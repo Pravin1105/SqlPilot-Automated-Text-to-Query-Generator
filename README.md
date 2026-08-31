@@ -1,4 +1,4 @@
-# SQLPilot — Automated Text-to-Query Generator & AI Database Interface
+# SQLPilot — Automated Text-to-Query Generator
 
 > **SQLPilot** is a local, schema-aware AI database assistant that converts plain English questions into valid SQL queries and safely executes them against relational databases using deterministic validation, 5-tier safety classification, human authorization, and controlled execution.
 
