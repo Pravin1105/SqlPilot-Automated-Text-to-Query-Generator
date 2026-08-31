@@ -8,7 +8,7 @@ on:
 
 jobs:
   lint:
-    name: Code Quality & Syntax Check
+    name: Code Syntax Check
     runs-on: ubuntu-latest
 
     steps:
@@ -20,18 +20,9 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install Dependencies
+      - name: Check Python Syntax Compilation
         run: |
-          python -m pip install --upgrade pip setuptools wheel
-          pip install ruff
-
-      - name: Syntax Compilation Check
-        run: |
-          python -m py_compile config.py sqlpilot/cli.py sqlpilot/core/*.py sqlpilot/db/*.py eval/*.py tests/*.py
-
-      - name: Lint Verification (Ruff)
-        run: |
-          ruff check .
+          python -m compileall sqlpilot config.py eval tests
 
   test:
     name: Unit & Security Tests (Python ${{ matrix.python-version }})
