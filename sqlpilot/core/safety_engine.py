@@ -1,6 +1,5 @@
 from enum import Enum
 from dataclasses import dataclass
-from typing import Optional
 import sqlglot.expressions as exp
 from sqlpilot.core.sql_parser import ValidationResult
 

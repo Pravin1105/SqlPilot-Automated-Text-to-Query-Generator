@@ -25,10 +25,13 @@ jobs:
           python -m pip install --upgrade pip setuptools wheel
           pip install ruff
 
-      - name: Check Syntax & Code Style
+      - name: Syntax Compilation Check
         run: |
           python -m py_compile config.py sqlpilot/cli.py sqlpilot/core/*.py sqlpilot/db/*.py eval/*.py tests/*.py
-          ruff check . --select=E,F,W --ignore=E501
+
+      - name: Lint Verification (Ruff)
+        run: |
+          ruff check .
 
   test:
     name: Unit & Security Tests (Python ${{ matrix.python-version }})
@@ -54,7 +57,6 @@ jobs:
         run: |
           python -m pip install --upgrade pip setuptools wheel
           pip install -r requirements.txt
-          pip install --no-build-isolation -e .
 
       - name: Seed Sample Database
         run: |
@@ -85,7 +87,6 @@ jobs:
         run: |
           python -m pip install --upgrade pip setuptools wheel
           pip install -r requirements.txt
-          pip install --no-build-isolation -e .
 
       - name: Run Benchmark Suite
         run: |

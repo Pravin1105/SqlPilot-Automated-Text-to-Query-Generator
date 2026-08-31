@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import List, Optional
 from sqlpilot.core.llm_provider import LLMProvider
 from sqlpilot.core.schema_inspector import DatabaseSchema
 from sqlpilot.core.schema_rag import SchemaRetriever
