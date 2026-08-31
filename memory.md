@@ -89,4 +89,6 @@ Execute        Human Approval Gate (`PermissionGate` Rich UI)
   - Implemented all core components (`SchemaInspector`, `SchemaRetriever`, `GeminiLLMProvider`, `SQLParserValidator`, `SafetyEngine`, `PermissionGate`, `ExecutionEngine`, `CorrectionEngine`, `HistoryMetricsLogger`).
   - Built Typer + Rich CLI interface (`sqlpilot/cli.py`).
   - Built evaluation benchmark harness (`eval/runner.py`) achieving 100% safety & retrieval accuracy.
-  - Achieved complete unit test pass (18/18 passed).
+  - Achieved complete unit test pass (19/19 passed).
+  - Initialized Git repository and connected remote: `https://github.com/Pravin1105/SqlPilot-Automated-Text-to-Query-Generator.git`.
+  - Configured and deployed GitHub Actions CI/CD Pipeline (`.github/workflows/ci.yml`) covering code quality, Python 3.9–3.11 test matrix, and evaluation benchmark validation.
