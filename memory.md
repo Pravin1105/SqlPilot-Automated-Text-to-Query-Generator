@@ -92,3 +92,4 @@ Execute        Human Approval Gate (`PermissionGate` Rich UI)
   - Achieved complete unit test pass (19/19 passed).
   - Initialized Git repository and connected remote: `https://github.com/Pravin1105/SqlPilot-Automated-Text-to-Query-Generator.git`.
   - Configured and deployed GitHub Actions CI/CD Pipeline (`.github/workflows/ci.yml`) covering code quality, Python 3.9–3.11 test matrix, and evaluation benchmark validation.
+  - Implemented **v1.2 Feature**: Multi-database connection manager (`ConnectionManager`) enforcing strict two-step switching (`disconnect <db>` -> `connect <db>`), existence verification, alert formatting (`"connected to a different db"`), and built second sample database (`data/sample_hr.db`). (Uncommitted local workspace).

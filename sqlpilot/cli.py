@@ -12,27 +12,29 @@ from rich.table import Table
 from rich.prompt import Prompt
 
 from config import settings
-from sqlpilot.core.execution_engine import ExecutionEngine
+from sqlpilot.core.connection_manager import ConnectionManager
 from sqlpilot.core.history_metrics import HistoryMetricsLogger, QueryRecord
 from sqlpilot.core.llm_provider import GeminiLLMProvider
 from sqlpilot.core.permission_gate import PermissionGate
 from sqlpilot.core.safety_engine import SafetyEngine
-from sqlpilot.core.schema_inspector import SchemaInspector
-from sqlpilot.core.sql_generator import SQLGenerator
-from sqlpilot.core.sql_parser import SQLParserValidator
-from sqlpilot.core.correction_engine import CorrectionEngine
 from sqlpilot.db.sample_db_builder import seed_sample_database
+from sqlpilot.db.sample_hr_db_builder import seed_sample_hr_database
 
 app = typer.Typer(help="SQLPilot — Local AI-Powered Database Assistant")
 console = Console()
 
 
-def print_banner(db_path: Path):
+def print_banner(db_path: Optional[Path]):
+    db_status = (
+        f"[bold green]{db_path.name}[/bold green] [dim]({db_path.resolve()})[/dim]"
+        if db_path
+        else "[bold red]None (Disconnected)[/bold red]"
+    )
     console.print(
         Panel(
-            "[bold cyan]SQLPilot[/bold cyan] — AI-Powered Natural Language Database Interface\n"
-            f"[dim]Connected to database:[/dim] [bold green]{db_path.resolve()}[/bold green]\n"
-            "[dim]Type 'exit' or 'quit' to close.[/dim]",
+            "[bold cyan]SQLPilot v1.2[/bold cyan] — AI-Powered Database Interface\n"
+            f"[dim]Connected Database:[/dim] {db_status}\n"
+            "[dim]Commands: 'connect <db_name.db>', 'disconnect <db_name.db>', 'exit'[/dim]",
             border_style="cyan",
         )
     )
@@ -60,24 +62,23 @@ def main(
         None, "--db", "-d", help="Path to SQLite database file"
     ),
     seed: bool = typer.Option(
-        False, "--seed", help="Force re-seeding of sample e-commerce database"
+        False, "--seed", help="Force re-seeding of sample databases"
     ),
 ):
     """Start interactive SQLPilot natural language database CLI."""
     target_db = db or settings.db_path
 
-    if seed or not target_db.exists():
-        console.print(f"[yellow]Seeding sample database at {target_db}...[/yellow]")
-        target_db = seed_sample_database(target_db)
+    if seed or not settings.db_path.exists():
+        console.print(f"[yellow]Seeding sample e-commerce database at {settings.db_path}...[/yellow]")
+        seed_sample_database(settings.db_path)
 
-    # 1. Initialize Inspector & Database Connection
-    inspector = SchemaInspector(target_db)
-    schema = inspector.inspect()
-    executor = ExecutionEngine(target_db)
-    permission_gate = PermissionGate(console=console)
-    history_logger = HistoryMetricsLogger()
+    # Seed second sample HR database for testing multi-db switching
+    hr_db_path = settings.data_dir / "sample_hr.db"
+    if seed or not hr_db_path.exists():
+        console.print(f"[yellow]Seeding sample HR database at {hr_db_path}...[/yellow]")
+        seed_sample_hr_database(hr_db_path)
 
-    # 2. Initialize Gemini Provider
+    # 1. Initialize LLM Provider
     try:
         llm_provider = GeminiLLMProvider()
     except ValueError as e:
@@ -87,16 +88,26 @@ def main(
         )
         sys.exit(1)
 
-    sql_generator = SQLGenerator(llm_provider, schema)
-    correction_engine = CorrectionEngine(llm_provider, schema)
-    sql_validator = SQLParserValidator(schema)
+    # 2. Initialize Connection Manager & Utilities
+    conn_manager = ConnectionManager(llm_provider)
+    permission_gate = PermissionGate(console=console)
+    history_logger = HistoryMetricsLogger()
 
-    print_banner(target_db)
+    # Initial connection attempt
+    if target_db.exists():
+        conn_manager.connect(str(target_db))
+
+    print_banner(conn_manager.db_path)
 
     # Interactive REPL Loop
     while True:
         try:
-            user_input = Prompt.ask("\n[bold green]sqlpilot>[/bold green]").strip()
+            prompt_label = (
+                f"[bold green]sqlpilot({conn_manager.db_path.name})>[/bold green] "
+                if conn_manager.is_connected and conn_manager.db_path
+                else "[bold yellow]sqlpilot(disconnected)>[/bold yellow] "
+            )
+            user_input = Prompt.ask(prompt_label).strip()
         except (KeyboardInterrupt, EOFError):
             console.print("\n[dim]Exiting SQLPilot. Goodbye![/dim]")
             break
@@ -104,16 +115,67 @@ def main(
         if not user_input:
             continue
 
-        if user_input.lower() in ("exit", "quit"):
+        input_lower = user_input.lower()
+
+        if input_lower in ("exit", "quit"):
             console.print("[dim]Exiting SQLPilot. Goodbye![/dim]")
             break
+
+        # Check command typos (e.g. conect, disconect)
+        first_word = input_lower.split()[0] if input_lower.split() else ""
+
+        if first_word in ("conect", "connet", "connct", "cnt"):
+            console.print("[bold red]Command Error: Unknown command. Did you mean 'connect <database_name.db>'?[/bold red]")
+            continue
+
+        if first_word in ("disconect", "disconnet", "disconnct", "disc"):
+            console.print("[bold red]Command Error: Unknown command. Did you mean 'disconnect <database_name.db>'?[/bold red]")
+            continue
+
+        # -------------------------------------------------------------
+        # COMMAND 1: DISCONNECT
+        # -------------------------------------------------------------
+        if first_word == "disconnect":
+            parts = user_input.split(maxsplit=1)
+            target_arg = parts[1] if len(parts) > 1 else None
+            ok, msg = conn_manager.disconnect(target_arg)
+            if ok:
+                console.print(f"[bold green]{msg}[/bold green]")
+            else:
+                console.print(f"[bold red]{msg}[/bold red]")
+            continue
+
+        # -------------------------------------------------------------
+        # COMMAND 2: CONNECT
+        # -------------------------------------------------------------
+        if first_word == "connect":
+            parts = user_input.split(maxsplit=1)
+            if len(parts) < 2:
+                console.print("[bold red]Usage: connect <database_name.db>[/bold red]")
+                continue
+            target_arg = parts[1]
+            ok, msg = conn_manager.connect(target_arg)
+            if ok:
+                console.print(f"[bold green]{msg}[/bold green]")
+            else:
+                console.print(f"[bold red]{msg}[/bold red]")
+            continue
+
+        # -------------------------------------------------------------
+        # NATURAL LANGUAGE QUERY PIPELINE
+        # -------------------------------------------------------------
+        if not conn_manager.is_connected or not conn_manager.executor:
+            console.print(
+                "[bold red]No database connected. Please run 'connect <database_name.db>' first.[/bold red]"
+            )
+            continue
 
         request_id = str(uuid.uuid4())[:8]
 
         # Step A: Generate SQL from LLM
         try:
             with console.status("[bold cyan]Analyzing schema & generating SQL...[/bold cyan]"):
-                gen_res = sql_generator.generate(user_input)
+                gen_res = conn_manager.sql_generator.generate(user_input)
         except Exception as err:
             console.print(f"[bold red]LLM Provider API Error:[/bold red] {err}")
             continue
@@ -133,13 +195,13 @@ def main(
 
             try:
                 with console.status("[bold cyan]Re-generating SQL with clarification...[/bold cyan]"):
-                    gen_res = sql_generator.generate(user_input)
+                    gen_res = conn_manager.sql_generator.generate(user_input)
             except Exception as err:
                 console.print(f"[bold red]LLM Provider API Error:[/bold red] {err}")
                 continue
 
         # Step B: Parse & Validate AST
-        val_res = sql_validator.parse_and_validate(gen_res.sql)
+        val_res = conn_manager.sql_validator.parse_and_validate(gen_res.sql)
         if not val_res.is_valid:
             console.print(f"[bold red]SQL Validation Error:[/bold red] {val_res.error_message}")
             continue
@@ -184,7 +246,7 @@ def main(
         # Step E: Execute Query & Self-Correction Loop
         attempts = 0
         current_sql = gen_res.sql
-        exec_res = executor.execute(current_sql)
+        exec_res = conn_manager.executor.execute(current_sql)
 
         while not exec_res.success and attempts < settings.max_correction_attempts:
             attempts += 1
@@ -192,7 +254,7 @@ def main(
                 f"[yellow]Database execution error encountered (Attempt {attempts}/{settings.max_correction_attempts}):[/yellow] {exec_res.error_message}"
             )
             with console.status("[bold cyan]Attempting automatic SQL correction...[/bold cyan]"):
-                corrected_gen = correction_engine.attempt_correction(
+                corrected_gen = conn_manager.correction_engine.attempt_correction(
                     question=user_input,
                     failed_sql=current_sql,
                     error_message=exec_res.error_message or "",
@@ -200,14 +262,14 @@ def main(
                 )
 
             # Validate corrected SQL through pipeline again
-            corr_val = sql_validator.parse_and_validate(corrected_gen.sql)
+            corr_val = conn_manager.sql_validator.parse_and_validate(corrected_gen.sql)
             if not corr_val.is_valid:
                 console.print(f"[bold red]Corrected SQL Validation Failed:[/bold red] {corr_val.error_message}")
                 break
 
             current_sql = corrected_gen.sql
             console.print(f"[bold cyan]Corrected SQL:[/bold cyan] [yellow]{current_sql}[/yellow]")
-            exec_res = executor.execute(current_sql)
+            exec_res = conn_manager.executor.execute(current_sql)
 
         # Display Execution Results
         if exec_res.success:
