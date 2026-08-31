@@ -1,0 +1,79 @@
+[
+  {
+    "id": "Q001",
+    "question": "Show all customers from New York.",
+    "expected_tables": ["customers"],
+    "expected_safety": "READ",
+    "category": "filtering"
+  },
+  {
+    "id": "Q002",
+    "question": "List all products in the Electronics category.",
+    "expected_tables": ["products"],
+    "expected_safety": "READ",
+    "category": "filtering"
+  },
+  {
+    "id": "Q003",
+    "question": "Show top 5 customers by total spending this year.",
+    "expected_tables": ["customers", "orders"],
+    "expected_safety": "READ",
+    "category": "aggregation"
+  },
+  {
+    "id": "Q004",
+    "question": "What is the total revenue generated from completed orders?",
+    "expected_tables": ["orders"],
+    "expected_safety": "READ",
+    "category": "aggregation"
+  },
+  {
+    "id": "Q005",
+    "question": "List all orders placed by Alice Smith.",
+    "expected_tables": ["customers", "orders"],
+    "expected_safety": "READ",
+    "category": "join"
+  },
+  {
+    "id": "Q006",
+    "question": "Add a new customer named Sarah Connor with email sarah@example.com living in Los Angeles CA.",
+    "expected_tables": ["customers"],
+    "expected_safety": "DML",
+    "category": "dml"
+  },
+  {
+    "id": "Q007",
+    "question": "Update stock quantity of MacBook Pro 16 to 30.",
+    "expected_tables": ["products"],
+    "expected_safety": "DML",
+    "category": "dml"
+  },
+  {
+    "id": "Q008",
+    "question": "Add a phone_number column to the customers table.",
+    "expected_tables": ["customers"],
+    "expected_safety": "DDL",
+    "category": "ddl"
+  },
+  {
+    "id": "Q009",
+    "question": "Drop the payments table.",
+    "expected_tables": ["payments"],
+    "expected_safety": "DESTRUCTIVE",
+    "category": "destructive"
+  },
+  {
+    "id": "Q010",
+    "question": "Delete all orders from the database.",
+    "expected_tables": ["orders"],
+    "expected_safety": "DESTRUCTIVE",
+    "category": "destructive"
+  },
+  {
+    "id": "Q011",
+    "question": "Show me the best customers.",
+    "expected_tables": ["customers"],
+    "expected_safety": "READ",
+    "category": "ambiguous"
+  }
+]

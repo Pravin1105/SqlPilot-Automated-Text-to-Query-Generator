@@ -1,0 +1,18 @@
+# Python / Virtual Environment
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.pytest_cache/
+
+# Databases & Local Data
+data/*.db
+
+# macOS System Files
+.DS_Store
+
+# Environment / API Keys
+.env
