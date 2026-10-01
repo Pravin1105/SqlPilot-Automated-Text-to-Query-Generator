@@ -12,6 +12,7 @@ class ColumnSchema:
     data_type: str
     is_nullable: bool = True
     is_primary_key: bool = False
+    is_unique: bool = False
     default_value: Optional[str] = None
 
 
@@ -109,6 +110,21 @@ class SchemaInspector:
         for table_name in table_names:
             table_schema = TableSchema(name=table_name)
 
+            # Discover unique single-column constraints/indexes
+            unique_cols = set()
+            try:
+                cursor.execute(f"PRAGMA index_list({table_name});")
+                # format: (seq, name, unique, origin, partial)
+                for idx_row in cursor.fetchall():
+                    if bool(idx_row[2]):  # unique == 1
+                        idx_name = idx_row[1]
+                        cursor.execute(f"PRAGMA index_info({idx_name});")
+                        idx_cols = cursor.fetchall()
+                        if len(idx_cols) == 1:
+                            unique_cols.add(idx_cols[0][2].lower())
+            except Exception:
+                pass
+
             # 1. Inspect Columns (PRAGMA table_info)
             cursor.execute(f"PRAGMA table_info({table_name});")
             # row format: (cid, name, type, notnull, dflt_value, pk)
@@ -116,12 +132,14 @@ class SchemaInspector:
                 _, col_name, data_type, notnull, dflt_val, pk = row
                 is_pk = bool(pk > 0)
                 is_nullable = not bool(notnull) and not is_pk
+                is_unique = (col_name.lower() in unique_cols) and not is_pk
 
                 col_schema = ColumnSchema(
                     name=col_name,
                     data_type=data_type.upper(),
                     is_nullable=is_nullable,
                     is_primary_key=is_pk,
+                    is_unique=is_unique,
                     default_value=str(dflt_val) if dflt_val is not None else None,
                 )
                 table_schema.columns.append(col_schema)

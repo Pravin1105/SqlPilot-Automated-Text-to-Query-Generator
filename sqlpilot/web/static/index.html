@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SQLPilot — Database Workspace</title>
+  <link rel="stylesheet" href="styles.css?v=2.3">
+</head>
+<body>
+  <div class="app-layout">
+    <!-- Top Application Bar -->
+    <header class="app-header">
+      <div class="header-brand">
+        <span class="brand-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
+            <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path>
+            <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path>
+          </svg>
+        </span>
+        <h1 class="brand-title">SQLPilot</h1>
+        <span class="app-version">v2.0</span>
+      </div>
+
+      <div class="header-center">
+        <!-- Database Switcher Dropdown -->
+        <div class="active-db-pill">
+          <span class="db-icon">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+              <line x1="3" y1="9" x2="21" y2="9"></line>
+              <line x1="9" y1="21" x2="9" y2="9"></line>
+            </svg>
+          </span>
+          <span class="db-label">Database:</span>
+          <select id="dbSelect" class="db-select" title="Switch Authorized Database">
+            <option value="sample_store.db">sample_store.db</option>
+          </select>
+          <span class="status-indicator-dot connected" id="dbStatusDot" title="Connected"></span>
+        </div>
+      </div>
+
+      <div class="header-status">
+        <!-- Connect / Upload DB Button -->
+        <button class="btn-header-action" id="btnOpenUploadModal" title="Connect your custom SQLite database">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="17 8 12 3 7 8"></polyline>
+            <line x1="12" y1="3" x2="12" y2="15"></line>
+          </svg>
+          <span>Upload DB</span>
+        </button>
+
+        <!-- User LLM Settings Button -->
+        <button class="btn-header-action" id="btnOpenSettingsModal" title="Configure your own LLM API Key">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+          <span>API Key</span>
+        </button>
+
+        <!-- User Profile & Logout -->
+        <div class="user-badge" id="userBadge">
+          <span class="user-avatar">👤</span>
+          <span class="user-name" id="userName">admin</span>
+          <span class="role-tag" id="userRole">Admin</span>
+          <button class="btn-logout" id="btnLogout" title="Log out of SQLPilot">Log out</button>
+        </div>
+
+        <span class="system-status-badge" id="systemStateBadge">
+          <span class="status-dot"></span>
+          <span id="systemStateText">Ready</span>
+        </span>
+      </div>
+    </header>
+
+    <!-- Workspace Body: Sidebar + Query Console -->
+    <div class="workspace-body">
+      <!-- Left Sidebar: Workspace & Schema Explorer -->
+      <aside class="sidebar">
+        <div class="sidebar-section">
+          <div class="sidebar-header">
+            <span class="sidebar-title">Workspace</span>
+            <button class="btn-icon" id="btnNewQuery" title="New Query Session">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+              </svg>
+              <span>New</span>
+            </button>
+          </div>
+
+          <div class="workspace-card">
+            <div class="workspace-card-row">
+              <span class="meta-label">Storage</span>
+              <span class="meta-value">Local / Offline</span>
+            </div>
+            <div class="workspace-card-row">
+              <span class="meta-label">Dialect</span>
+              <span class="meta-value">SQLite 3</span>
+            </div>
+            <div class="workspace-card-row">
+              <span class="meta-label">State</span>
+              <span class="status-text connected" id="connectionStateLabel">Connected</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Schema / Table Explorer -->
+        <div class="sidebar-section schema-section">
+          <div class="sidebar-header">
+            <span class="sidebar-title">Schema Explorer</span>
+            <span class="table-count-badge" id="tableCountBadge">5 tables</span>
+          </div>
+
+          <div class="schema-search-container">
+            <input type="text" id="schemaSearchInput" class="schema-search-input" placeholder="Filter tables or columns...">
+          </div>
+
+          <div class="schema-tree" id="schemaTree">
+            <!-- Dynamically populated tables & columns -->
+          </div>
+        </div>
+
+        <!-- Recent Queries -->
+        <div class="sidebar-section recent-section">
+          <div class="sidebar-header">
+            <span class="sidebar-title">Recent Queries</span>
+          </div>
+          <div class="recent-list" id="recentList">
+            <!-- Dynamically populated or default chips -->
+          </div>
+        </div>
+      </aside>
+
+      <!-- Main Query Console -->
+      <main class="query-console">
+        <!-- Natural-Language Query Box -->
+        <section class="console-card prompt-card">
+          <div class="card-header">
+            <div class="card-header-left">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+              </svg>
+              <h2 class="card-title">Natural-Language Query</h2>
+            </div>
+            <span class="hint-text">Shift + Enter for new line • Enter to run</span>
+          </div>
+
+          <div class="input-wrapper">
+            <textarea
+              id="queryInput"
+              class="query-textarea"
+              placeholder="Ask a question about your database in plain English... (e.g. Show top 5 customers by total spending this year)"
+              rows="3"
+            ></textarea>
+          </div>
+
+          <div class="prompt-footer">
+            <div class="sample-queries" id="sampleQueriesBar">
+              <span class="sample-label">Examples:</span>
+              <button class="sample-chip" data-sample="read">Top 5 customers</button>
+              <button class="sample-chip" data-sample="filter">Electronics products</button>
+              <button class="sample-chip" data-sample="dml">Update stock quantity</button>
+              <button class="sample-chip" data-sample="destructive">Drop table payments</button>
+              <button class="sample-chip" data-sample="error">Invalid table query</button>
+            </div>
+
+            <div class="action-buttons">
+              <button class="btn btn-secondary" id="btnClearPrompt">Clear</button>
+              <button class="btn btn-primary" id="btnRunQuery">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                </svg>
+                <span>Run Query</span>
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <!-- Progress / Workflow Bar -->
+        <div class="workflow-stepper" id="workflowStepper">
+          <div class="step-item active" id="stepInput">1. Request</div>
+          <div class="step-arrow">→</div>
+          <div class="step-item" id="stepGen">2. Schema Retrieval &amp; SQL</div>
+          <div class="step-arrow">→</div>
+          <div class="step-item" id="stepVal">3. SQLGlot Validation</div>
+          <div class="step-arrow">→</div>
+          <div class="step-item" id="stepSafety">4. Safety Gate</div>
+          <div class="step-arrow">→</div>
+          <div class="step-item" id="stepExec">5. Database Execution</div>
+        </div>
+
+        <!-- Generated SQL Display Panel -->
+        <section class="console-card sql-card" id="sqlPanel">
+          <div class="card-header">
+            <div class="card-header-left">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="16 18 22 12 16 6"></polyline>
+                <polyline points="8 6 2 12 8 18"></polyline>
+              </svg>
+              <h2 class="card-title">Generated SQL</h2>
+              <span class="safety-badge" id="safetyBadge">READ</span>
+            </div>
+
+            <div class="card-header-right">
+              <button class="btn-icon" id="btnCopySql" title="Copy SQL to Clipboard">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
+                <span id="copyBtnText">Copy</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="sql-code-container">
+            <pre><code id="generatedSqlText">-- Generated SQL will appear here</code></pre>
+          </div>
+
+          <!-- Plain-English Explanation -->
+          <div class="explanation-box" id="explanationBox">
+            <div class="explanation-title">What this query does:</div>
+            <p id="explanationText" class="explanation-content">
+              Query explanation will appear here after generation.
+            </p>
+          </div>
+
+          <!-- Human-in-the-Loop Modification Approval Gate Banner -->
+          <div class="approval-gate-banner hidden" id="approvalGateBanner">
+            <div class="approval-header">
+              <span class="warning-icon" id="approvalWarningIcon">⚠️</span>
+              <div class="approval-title" id="approvalBannerTitle">
+                Permission Required for Database Modification
+              </div>
+            </div>
+
+            <div class="approval-impact" id="approvalImpactDetails">
+              <div class="impact-heading">Impact Assessment:</div>
+              <ul class="impact-list" id="impactList">
+                <li>Data rows will be modified in target table.</li>
+              </ul>
+            </div>
+
+            <div class="approval-prompt-line">
+              <span id="approvalPromptText">Do you want to execute this query against the local database?</span>
+            </div>
+
+            <div class="approval-actions">
+              <button class="btn btn-reject" id="btnRejectQuery">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+                <span>No, Cancel</span>
+              </button>
+              <button class="btn btn-approve" id="btnApproveQuery">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="20 6 9 17 4 12"></polyline>
+                </svg>
+                <span>Yes, Execute</span>
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <!-- Query Results Display Panel -->
+        <section class="console-card results-card" id="resultsPanel">
+          <div class="card-header">
+            <div class="card-header-left">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                <line x1="3" y1="9" x2="21" y2="9"></line>
+                <line x1="3" y1="15" x2="21" y2="15"></line>
+                <line x1="9" y1="3" x2="9" y2="21"></line>
+                <line x1="15" y1="3" x2="15" y2="21"></line>
+              </svg>
+              <h2 class="card-title">Query Results</h2>
+              <span class="row-count-badge" id="resultRowCountBadge">0 rows</span>
+            </div>
+
+            <div class="card-header-right">
+              <span class="metric-badge" id="executionTimeBadge">0.00 ms</span>
+            </div>
+          </div>
+
+          <!-- Empty State -->
+          <div class="state-container empty-state" id="emptyState">
+            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="12" y1="8" x2="12" y2="12"></line>
+              <line x1="12" y1="16" x2="12.01" y2="16"></line>
+            </svg>
+            <p class="state-title">No query executed yet</p>
+            <p class="state-subtitle">Enter a question above or pick one of the sample queries to inspect the workflow.</p>
+          </div>
+
+          <!-- Loading State -->
+          <div class="state-container loading-state hidden" id="loadingState">
+            <div class="loading-spinner"></div>
+            <p class="state-title" id="loadingStateTitle">Analyzing schema and generating SQL...</p>
+            <p class="state-subtitle">Zero database records leave your local machine.</p>
+          </div>
+
+          <!-- Error State -->
+          <div class="state-container error-state hidden" id="errorState">
+            <div class="error-icon-box">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86 7.86 2"></polygon>
+                <line x1="12" y1="8" x2="12" y2="12"></line>
+                <line x1="12" y1="16" x2="12.01" y2="16"></line>
+              </svg>
+            </div>
+            <p class="error-title" id="errorTitle">Query Error</p>
+            <p class="error-message" id="errorMessage">An error occurred during execution.</p>
+          </div>
+
+          <!-- Tabular Results Table -->
+          <div class="table-scroll-wrapper hidden" id="resultsTableContainer">
+            <table class="results-table" id="resultsTable">
+              <thead id="resultsTableHead"></thead>
+              <tbody id="resultsTableBody"></tbody>
+            </table>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <!-- Authentication / Login Modal -->
+  <div class="auth-modal-overlay hidden" id="authModal">
+    <div class="auth-modal-card">
+      <div class="auth-modal-header">
+        <div class="auth-brand-icon">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+          </svg>
+        </div>
+        <h2 class="auth-modal-title">Sign in to SQLPilot</h2>
+        <p class="auth-modal-subtitle">Secure abstraction layer over local SQLite databases</p>
+      </div>
+
+      <form id="authForm" class="auth-form" onsubmit="return false;">
+        <div class="form-group">
+          <label for="loginUsername" class="form-label">User ID</label>
+          <input type="text" id="loginUsername" class="form-input" placeholder="e.g. admin or analyst" autocomplete="username" required>
+        </div>
+
+        <div class="form-group">
+          <label for="loginPassword" class="form-label">Password</label>
+          <input type="password" id="loginPassword" class="form-input" placeholder="Enter password" autocomplete="current-password" required>
+        </div>
+
+        <div class="auth-error-box hidden" id="authErrorBox">
+          <span class="auth-error-msg" id="authErrorMsg">Invalid credentials</span>
+        </div>
+
+        <button type="submit" id="btnLoginSubmit" class="btn-auth-submit">
+          <span>Authenticate & Access</span>
+        </button>
+
+        <!-- Quick Demo Credentials Chips -->
+        <div class="quick-credentials">
+          <span class="quick-cred-label">Demo Logins:</span>
+          <button type="button" class="btn-cred-chip" id="btnCredAdmin">👤 Admin (All DBs)</button>
+          <button type="button" class="btn-cred-chip" id="btnCredAnalyst">👤 Analyst (Store DB)</button>
+        </div>
+      </form>
+
+      <div class="auth-modal-footer">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+        </svg>
+        <span>All database records remain 100% offline & local.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Upload Database Modal -->
+  <div class="auth-modal-overlay hidden" id="uploadModal">
+    <div class="auth-modal-card">
+      <div class="modal-card-top">
+        <h2 class="auth-modal-title">Connect Custom Database</h2>
+        <button type="button" class="btn-modal-close" id="btnCloseUploadModal" title="Close">✕</button>
+      </div>
+      <p class="auth-modal-subtitle">Upload your SQLite database (.db, .sqlite). Stored in your private tenant workspace.</p>
+
+      <form id="uploadForm" class="auth-form" onsubmit="return false;">
+        <div class="file-dropzone" id="fileDropzone">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="17 8 12 3 7 8"></polyline>
+            <line x1="12" y1="3" x2="12" y2="15"></line>
+          </svg>
+          <p class="dropzone-text" id="dropzoneText">Click to select or drag SQLite file here</p>
+          <span class="dropzone-hint">.db, .sqlite, .sqlite3 (Max 50MB)</span>
+          <input type="file" id="dbFileInput" accept=".db,.sqlite,.sqlite3" style="display:none;">
+        </div>
+
+        <div class="auth-error-box hidden" id="uploadErrorBox">
+          <span class="auth-error-msg" id="uploadErrorMsg"></span>
+        </div>
+
+        <button type="button" id="btnUploadSubmit" class="btn-auth-submit" disabled>
+          <span>Upload & Connect</span>
+        </button>
+      </form>
+
+      <div class="auth-modal-footer">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+        </svg>
+        <span>Zero tuples or records will ever be sent to LLMs or vector indices.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- User LLM Provider Settings Modal -->
+  <div class="auth-modal-overlay hidden" id="settingsModal">
+    <div class="auth-modal-card">
+      <div class="modal-card-top">
+        <h2 class="auth-modal-title">LLM Provider Settings</h2>
+        <button type="button" class="btn-modal-close" id="btnCloseSettingsModal" title="Close">✕</button>
+      </div>
+      <p class="auth-modal-subtitle">Bring your own API key. Keys stay in your browser's private localStorage.</p>
+
+      <form id="settingsForm" class="auth-form" onsubmit="return false;">
+        <div class="form-group">
+          <label for="settingProvider" class="form-label">Provider</label>
+          <select id="settingProvider" class="form-input">
+            <option value="groq">Groq Cloud (High Speed, Free Tier Available)</option>
+            <option value="gemini">Google Gemini</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="settingApiKey" class="form-label">Your API Key</label>
+          <input type="password" id="settingApiKey" class="form-input" placeholder="gsk_... or Gemini API key" autocomplete="off">
+        </div>
+
+        <div class="form-group">
+          <label for="settingModel" class="form-label">Model</label>
+          <input type="text" id="settingModel" class="form-input" placeholder="e.g. openai/gpt-oss-120b, llama-3.3-70b-versatile, or gemini-2.5-flash">
+        </div>
+
+        <div class="auth-error-box hidden" id="settingsStatusBox">
+          <span class="auth-error-msg" id="settingsStatusMsg"></span>
+        </div>
+
+        <div class="modal-button-row">
+          <button type="button" id="btnSaveSettings" class="btn-auth-submit" style="flex:1;">
+            <span>Save Settings</span>
+          </button>
+          <button type="button" id="btnClearSettings" class="btn-secondary" style="padding:10px 14px;">
+            <span>Clear</span>
+          </button>
+        </div>
+      </form>
+
+      <div class="auth-modal-footer">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="12" y1="16" x2="12" y2="12"></line>
+          <line x1="12" y1="8" x2="12.01" y2="8"></line>
+        </svg>
+        <span>Custom API keys are sent via request headers and override server defaults.</span>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js?v=2.3"></script>
+</body>
+</html>

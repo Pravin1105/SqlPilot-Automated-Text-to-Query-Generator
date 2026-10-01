@@ -80,6 +80,13 @@ class ConnectionManager:
         self.reset_state()
         return (True, f"Successfully disconnected from '{old_name}'.")
 
+    def set_llm_provider(self, llm_provider: LLMProvider) -> None:
+        """Update active LLM provider and associated generator / correction engine."""
+        self.llm_provider = llm_provider
+        if self.schema:
+            self.sql_generator = SQLGenerator(self.llm_provider, self.schema)
+            self.correction_engine = CorrectionEngine(self.llm_provider, self.schema)
+
     def reset_state(self):
         """Reset connection state to DISCONNECTED."""
         self.db_path = None

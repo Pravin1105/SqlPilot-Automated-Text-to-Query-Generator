@@ -10,6 +10,9 @@ __pycache__/
 
 # Databases & Local Data
 data/*.db
+!data/sample_store.db
+data/user_databases/
+SQLPilot_project_docs/
 
 # macOS System Files
 .DS_Store
