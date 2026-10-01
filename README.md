@@ -264,9 +264,146 @@ Benchmark Output:
 
 ## 📄 Documentation Index
 
-- [memory.md](file:///Users/pravin/Documents/QueryGenerator/memory.md) — Living project decision log and progress state.
-- [CONTEXT.md](file:///Users/pravin/Documents/QueryGenerator/CONTEXT.md) — Detailed requirements and architecture specifications.
-- [SQLPilot_project_docs/](file:///Users/pravin/Documents/QueryGenerator/SQLPilot_project_docs/) — Subdirectory containing PRD, Security Model, and Architecture docs.
+- [CONTEXT.md](CONTEXT.md) — Comprehensive technical architecture, phased roadmap, and security model.
+
+---
+
+## 🌟 What's New in Version 2.0 (v2.0)
+
+SQLPilot v2.0 elevates the project from a CLI prototype into a production-ready, security-hardened **Web Workspace** designed for real-world deployments with complete data privacy, client-side isolation, and an interactive interface.
+
+### 🔑 Key Changes in v2.0
+
+1. **Zero-Dependency Modern Web Workspace**:
+   - High-performance, minimalist desktop database console built with standard web technologies (HTML5, CSS3, vanilla ES6 JavaScript) and Python's standard `http.server` backend.
+   - Adheres strictly to an ergonomic dark emerald palette (`#092328`, `#12544F`, `#2A835F`, `#8BBB92`). Zero third-party frontend frameworks, zero CDN dependencies, zero external tracking.
+
+2. **Interactive Schema Explorer (Dynamic Push-Down Accordion)**:
+   - Left sidebar schema viewer displaying all tables and attributes in the connected database.
+   - **Smooth push-down accordion**: Clicking any table row smoothly expands its columns while automatically shifting subsequent rows downward with dynamic, responsive height adaptation.
+   - **Semantic tag badges**:
+     - `PK` **Primary Key** (distinct emerald accent)
+     - `UNIQUE` **Unique Constraint** (light teal outline)
+     - `NOT NULL` **Not-Null Constraint** (deep teal badge)
+     - `FK ➔ [table]` **Foreign Key** (compact pill with full target metadata in hover tooltip)
+   - Real-time search filter for both table names and column names.
+
+3. **Production BYOK (Bring Your Own Key)**:
+   - Zero hardcoded API keys: Users configure their own Groq Cloud (`openai/gpt-oss-120b`, `llama-3.3-70b-versatile`) or Google Gemini API key directly through the in-browser **Settings (⚙️)** modal.
+   - API keys are stored strictly in client-side browser `localStorage` and passed per-request via secure `X-LLM-Api-Key` HTTP headers. Keys are never saved in database files, session cookies, or server configuration.
+
+4. **Custom Database Upload & Tenant Isolation**:
+   - Users can securely upload and connect their own `.db` or `.sqlite` files directly through the **Upload DB (📁)** modal.
+   - Security validation: Enforces SQLite 3 binary magic header checking (`SQLite format 3\x00`), filename sanitization, and tenant-isolated storage (`data/user_databases/<username>/`) with POSIX `0600` permissions.
+   - Starter database `data/sample_store.db` is bundled for trying out queries immediately.
+
+5. **Offline Zero-Record Privacy Invariant**:
+   - Database schema extraction, vector chunking, and TF-IDF RAG retrieval execute **100% offline** on the user's local machine.
+   - **Zero rows, records, or tuples are EVER read, embedded, or transmitted to any external LLM.** Only structural DDL schema metadata (table names, column names, constraints) is shared with the model.
+
+6. **Human-in-the-Loop Safety Gate**:
+   - Safe `READ` (`SELECT`) queries execute autonomously against the local database and render data tables with execution metrics.
+   - Any modifying operations (`INSERT`, `UPDATE`, `DELETE`, `ALTER`, `DROP`) halt at the **Permission Gate**, presenting the generated SQL, plain-English explanation, and schema impact assessment for explicit user confirmation.
+
+7. **Multi-User Authentication**:
+   - Salted PBKDF2 password hashing with SHA-256 and cryptographically random session tokens for workspace isolation.
+
+---
+
+## 📦 Step-by-Step Guide: Running SQLPilot from Clone
+
+Follow these steps to run SQLPilot locally on your machine from scratch:
+
+### Step 1: Clone the Repository
+
+```bash
+git clone https://github.com/Pravin1105/SqlPilot-Automated-Text-to-Query-Generator.git
+cd SqlPilot-Automated-Text-to-Query-Generator
+```
+
+### Step 2: Create and Activate a Virtual Environment
+
+```bash
+# macOS / Linux
+python3 -m venv .venv
+source .venv/bin/activate
+
+# Windows (Command Prompt)
+python -m venv .venv
+.venv\Scripts\activate.bat
+
+# Windows (PowerShell)
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+```
+
+### Step 3: Install Dependencies
+
+```bash
+pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+### Step 4: Launch the Web Workspace
+
+Start the local server daemon:
+
+```bash
+python3 sqlpilot/web/server.py --port 8000
+```
+
+You will see:
+```text
+==================================================
+ SQLPilot Web Workspace (Phase 3 Active)
+ Connected DB: sample_store.db
+ Auth Enforced: True
+ Serving directory: .../sqlpilot/web/static
+==================================================
+```
+
+### Step 5: Open in Your Browser & Log In
+
+1. Open **[http://localhost:8000](http://localhost:8000)** in Chrome, Safari, Firefox, or Edge.
+2. Log in using the default administrator credentials:
+   - **Username**: `admin`
+   - **Password**: `admin`
+
+### Step 6: Configure Your LLM API Key (BYOK)
+
+1. Click the **API Key (⚙️)** button in the top navigation bar.
+2. Select your provider:
+   - **Groq Cloud (Recommended)**: Paste your Groq API key (`gsk_...`) and choose your model (e.g., `openai/gpt-oss-120b` or `llama-3.3-70b-versatile`).
+   - **Google Gemini**: Paste your Gemini API key (`AIza...`) and choose your model (e.g., `gemini-2.5-flash`).
+3. Click **Save Settings**. Your key is securely stored in your local browser storage.
+
+### Step 7: Start Querying & Connect Your Own Database!
+
+- **Query the Starter Store**: Try one of the example chips or ask a question:
+  ```text
+  show me the top 5 customers by total spending this year
+  ```
+- **Upload Your Own Database**: Click **Upload DB (📁)**, select your `.sqlite` or `.db` file, and explore its tables and columns in the interactive Schema Explorer!
+
+---
+
+### Alternative: CLI Mode
+
+You can also run SQLPilot directly in your terminal:
+
+```bash
+python3 sqlpilot/cli.py interactive
+```
+
+---
+
+### Running the Test Suite
+
+Run the full automated test suite (65 passing unit and integration tests):
+
+```bash
+pytest tests/ --verbose
+```
 
 ---
 
