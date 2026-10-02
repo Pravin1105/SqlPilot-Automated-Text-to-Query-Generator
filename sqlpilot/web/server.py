@@ -37,16 +37,28 @@ class SQLPilotHTTPRequestHandler(SimpleHTTPRequestHandler):
         super().__init__(*args, directory=directory, **kwargs)
 
     def _get_clean_path(self) -> str:
-        """Resolve clean API path."""
-        path = self.path.split("?")[0].rstrip("/")
-        if path and path not in ("/api/index.py", "/api/index", "/api"):
-            return path
+        """Resolve clean API path considering Vercel rewrite query parameters and proxy headers."""
+        # 1. Check if Vercel rewrite passed the route via query parameter: ?__path=... or ?path=...
+        if "?" in self.path:
+            parsed = urlparse(self.path)
+            params = parse_qs(parsed.query)
+            if "__path" in params and params["__path"]:
+                sub = params["__path"][0].strip().lstrip("/")
+                return f"/api/{sub}"
+            if "path" in params and params["path"]:
+                sub = params["path"][0].strip().lstrip("/")
+                return f"/api/{sub}"
 
+        # 2. Check proxy forwarding headers
         for h in ("x-forwarded-uri", "x-real-path", "x-original-uri"):
             val = self.headers.get(h)
             if val:
-                return val.split("?")[0].rstrip("/")
+                p = val.split("?")[0].rstrip("/")
+                if p and p not in ("/api/index.py", "/api/index", "/api"):
+                    return p
 
+        # 3. Direct path (local server or unrewritten path)
+        path = self.path.split("?")[0].rstrip("/")
         return path
 
     def end_headers(self):
