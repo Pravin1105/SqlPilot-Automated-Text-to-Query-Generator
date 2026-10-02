@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from config import settings
+from config import settings, BASE_DIR
 from sqlpilot.core.connection_manager import ConnectionManager
 from sqlpilot.core.history_metrics import HistoryMetricsLogger, QueryRecord
 from sqlpilot.core.llm_provider import GeminiLLMProvider, LLMProvider
@@ -55,7 +55,7 @@ class SQLPilotWebService:
         target_db = db_path or settings.db_path
         if not target_db.exists():
             target_db.parent.mkdir(parents=True, exist_ok=True)
-            source_seed = PROJECT_ROOT / "data" / "sample_store.db"
+            source_seed = BASE_DIR / "data" / "sample_store.db"
             if source_seed.exists():
                 import shutil
                 shutil.copy2(source_seed, target_db)

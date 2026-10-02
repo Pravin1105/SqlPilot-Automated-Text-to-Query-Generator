@@ -302,7 +302,13 @@
         body: jsonSafe({ username, password })
       });
 
-      const data = await resp.json();
+      let data;
+      try {
+        data = await resp.json();
+      } catch (jsonErr) {
+        throw new Error(`Server returned status ${resp.status} (${resp.statusText || "Non-JSON response"})`);
+      }
+
       if (resp.ok && data.success) {
         sessionToken = data.token;
         currentUser = data.user;
@@ -319,7 +325,7 @@
         elements.authErrorBox.classList.remove("hidden");
       }
     } catch (err) {
-      elements.authErrorMsg.textContent = "Failed to connect to authentication service.";
+      elements.authErrorMsg.textContent = err.message || "Failed to connect to authentication service.";
       elements.authErrorBox.classList.remove("hidden");
     } finally {
       elements.btnLoginSubmit.disabled = false;

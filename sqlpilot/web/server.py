@@ -37,9 +37,17 @@ class SQLPilotHTTPRequestHandler(SimpleHTTPRequestHandler):
         super().__init__(*args, directory=directory, **kwargs)
 
     def _get_clean_path(self) -> str:
-        """Resolve clean API path considering reverse proxies and rewrites."""
-        raw_path = self.headers.get("x-forwarded-uri") or self.headers.get("x-matched-path") or self.path
-        return raw_path.split("?")[0].rstrip("/")
+        """Resolve clean API path."""
+        path = self.path.split("?")[0].rstrip("/")
+        if path and path not in ("/api/index.py", "/api/index", "/api"):
+            return path
+
+        for h in ("x-forwarded-uri", "x-real-path", "x-original-uri"):
+            val = self.headers.get(h)
+            if val:
+                return val.split("?")[0].rstrip("/")
+
+        return path
 
     def end_headers(self):
         self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")

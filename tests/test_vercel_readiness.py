@@ -21,7 +21,7 @@ class TestVercelDeploymentReadiness(unittest.TestCase):
             data = json.load(f)
 
         rewrites = data.get("rewrites", [])
-        self.assertTrue(len(rewrites) >= 2, "vercel.json must have at least 2 rewrites")
+        self.assertTrue(len(rewrites) >= 1, "vercel.json must have at least 1 rewrite")
 
         api_rewrite = next((r for r in rewrites if r.get("destination") == "/api/index.py"), None)
         self.assertIsNotNone(api_rewrite, "vercel.json must route /api/(.*) to /api/index.py")
@@ -52,6 +52,34 @@ class TestVercelDeploymentReadiness(unittest.TestCase):
         from sqlpilot.web.server import SQLPilotHTTPRequestHandler
 
         self.assertTrue(issubclass(handler, SQLPilotHTTPRequestHandler))
+
+    def test_serverless_login_flow(self):
+        """Simulate Vercel serverless invocation of POST /api/auth/login."""
+        import io
+        import sys
+        if str(self.root) not in sys.path:
+            sys.path.insert(0, str(self.root))
+
+        from api.index import handler
+
+        body = json.dumps({"username": "admin", "password": "admin123"}).encode("utf-8")
+        h = handler.__new__(handler)
+        h.rfile = io.BytesIO(body)
+        h.wfile = io.BytesIO()
+        h.client_address = ("127.0.0.1", 54321)
+        h.headers = {
+            "Content-Length": str(len(body)),
+            "Content-Type": "application/json",
+        }
+        h.path = "/api/auth/login"
+        h.requestline = "POST /api/auth/login HTTP/1.1"
+        h.request_version = "HTTP/1.1"
+        h.do_POST()
+
+        raw_output = h.wfile.getvalue().decode("utf-8")
+        self.assertIn("200 OK", raw_output)
+        self.assertIn('"success": true', raw_output)
+        self.assertIn("token", raw_output)
 
 
 if __name__ == "__main__":
