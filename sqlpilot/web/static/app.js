@@ -1085,52 +1085,92 @@
 
     if (elements.btnUploadSubmit) {
       elements.btnUploadSubmit.disabled = true;
-      elements.btnUploadSubmit.textContent = "Uploading & Indexing...";
+      elements.btnUploadSubmit.textContent = "Compressing & Uploading...";
     }
     if (elements.uploadErrorBox) {
       elements.uploadErrorBox.classList.add("hidden");
     }
 
-    const reader = new FileReader();
-    reader.onload = async function (e) {
-      try {
-        const base64Data = e.target.result.split(",")[1];
-        const resp = await fetchWithAuth("/api/database/upload", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: jsonSafe({
-            filename: selectedUploadFile.name,
-            file_data: base64Data
-          })
-        });
+    try {
+      let uploadBytes;
 
-        const data = await resp.json();
-        if (resp.ok && data.success) {
-          closeUploadModal();
-          resetSession();
-          await loadDatabases();
-          await fetchBackendSchema();
-          await fetchBackendStatus();
-          setSystemState("Ready");
-        } else {
-          if (elements.uploadErrorMsg) {
-            elements.uploadErrorMsg.textContent = data.error || "Failed to upload database.";
-            elements.uploadErrorBox.classList.remove("hidden");
-          }
+      // 1. Client-side gzip compression using standard Web Streams API (reduces SQLite by 60-90%)
+      if (typeof CompressionStream !== "undefined") {
+        try {
+          const compStream = selectedUploadFile.stream().pipeThrough(new CompressionStream("gzip"));
+          const response = new Response(compStream);
+          const blob = await response.blob();
+          uploadBytes = new Uint8Array(await blob.arrayBuffer());
+        } catch (compErr) {
+          uploadBytes = new Uint8Array(await selectedUploadFile.arrayBuffer());
         }
-      } catch (err) {
+      } else {
+        uploadBytes = new Uint8Array(await selectedUploadFile.arrayBuffer());
+      }
+
+      // 2. Chunk-safe Base64 conversion (avoids call stack size limits on large typed arrays)
+      let binaryStr = "";
+      const CHUNK_SIZE = 0x8000;
+      for (let i = 0; i < uploadBytes.length; i += CHUNK_SIZE) {
+        binaryStr += String.fromCharCode.apply(null, uploadBytes.subarray(i, i + CHUNK_SIZE));
+      }
+      const base64Data = btoa(binaryStr);
+
+      // 3. Check against Vercel's 4.5 MB request body limit
+      if (base64Data.length > 4.2 * 1024 * 1024) {
+        throw new Error(
+          `Database file exceeds serverless 4.5 MB payload limit (${(selectedUploadFile.size / 1024 / 1024).toFixed(1)} MB raw, ${(uploadBytes.length / 1024 / 1024).toFixed(1)} MB compressed). Please use a smaller database.`
+        );
+      }
+
+      if (elements.btnUploadSubmit) {
+        elements.btnUploadSubmit.textContent = "Uploading & Indexing...";
+      }
+
+      const resp = await fetchWithAuth("/api/database/upload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: jsonSafe({
+          filename: selectedUploadFile.name,
+          file_data: base64Data
+        })
+      });
+
+      if (resp.status === 413) {
+        throw new Error("File exceeds serverless payload limits (HTTP 413 Request Entity Too Large).");
+      }
+
+      let data;
+      try {
+        data = await resp.json();
+      } catch (jsonErr) {
+        throw new Error(`Server returned HTTP ${resp.status} (${resp.statusText || "Non-JSON response"})`);
+      }
+
+      if (resp.ok && data.success) {
+        closeUploadModal();
+        resetSession();
+        await loadDatabases();
+        await fetchBackendSchema();
+        await fetchBackendStatus();
+        setSystemState("Ready");
+      } else {
         if (elements.uploadErrorMsg) {
-          elements.uploadErrorMsg.textContent = "Upload failed: " + err.message;
+          elements.uploadErrorMsg.textContent = data.error || "Failed to upload database.";
           elements.uploadErrorBox.classList.remove("hidden");
         }
-      } finally {
-        if (elements.btnUploadSubmit) {
-          elements.btnUploadSubmit.disabled = false;
-          elements.btnUploadSubmit.textContent = "Upload & Connect";
-        }
       }
-    };
-    reader.readAsDataURL(selectedUploadFile);
+    } catch (err) {
+      if (elements.uploadErrorMsg) {
+        elements.uploadErrorMsg.textContent = "Upload failed: " + err.message;
+        elements.uploadErrorBox.classList.remove("hidden");
+      }
+    } finally {
+      if (elements.btnUploadSubmit) {
+        elements.btnUploadSubmit.disabled = false;
+        elements.btnUploadSubmit.textContent = "Upload & Connect";
+      }
+    }
   }
 
   function attachEventListeners() {

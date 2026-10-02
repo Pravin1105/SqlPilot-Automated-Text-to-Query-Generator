@@ -183,6 +183,23 @@ class TestProductionCustomDBAndKeys(unittest.TestCase):
         self.assertIn("patients", table_names)
         self.assertIn("consultations", table_names)
 
+    def test_upload_gzip_compressed_sqlite_database(self):
+        """Compressed SQLite databases (e.g. for bypassing Vercel 4.5MB payload limit) are automatically decompressed."""
+        import gzip
+        with open(self.custom_sqlite_path, "rb") as f:
+            valid_bytes = f.read()
+
+        compressed_bytes = gzip.compress(valid_bytes)
+        res = self.service.upload_database("compressed_hospital.sqlite", compressed_bytes, token=self.token)
+
+        self.assertTrue(res.get("success"), res.get("error"))
+        self.assertEqual(res.get("database"), "compressed_hospital.sqlite")
+
+        # Verify saved in uncompressed format
+        expected_path = self.user_db_root / "analyst" / "compressed_hospital.sqlite"
+        self.assertTrue(expected_path.exists())
+        self.assertEqual(expected_path.stat().st_size, len(valid_bytes))
+
     def test_upload_filename_traversal_sanitization(self):
         """Path traversal characters like ../ are sanitized to prevent directory traversal."""
         with open(self.custom_sqlite_path, "rb") as f:

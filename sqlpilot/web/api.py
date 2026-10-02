@@ -280,6 +280,17 @@ class SQLPilotWebService:
         session = self.auth_service.verify_token(token or "") if token else None
         username = session.username if session else ("admin" if not self.enforce_auth else "anonymous")
 
+        # Decompress if payload was compressed with gzip (e.g. for Vercel 4.5MB payload limit bypass)
+        if file_bytes[:2] == b"\x1f\x8b":
+            import gzip
+            try:
+                file_bytes = gzip.decompress(file_bytes)
+            except Exception as e:
+                return {
+                    "success": False,
+                    "error": f"Failed to decompress database file: {str(e)}",
+                }
+
         # 1. Validate SQLite magic header (16 bytes: "SQLite format 3\000")
         if len(file_bytes) < 100 or file_bytes[:16] != b"SQLite format 3\x00":
             return {
