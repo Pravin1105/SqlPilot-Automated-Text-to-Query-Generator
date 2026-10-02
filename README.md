@@ -373,8 +373,10 @@ You will see:
 
 1. Click the **API Key (⚙️)** button in the top navigation bar.
 2. Select your provider:
-   - **Groq Cloud (Recommended)**: Paste your Groq API key (`gsk_...`) and choose your model (e.g., `openai/gpt-oss-120b` or `llama-3.3-70b-versatile`).
-   - **Google Gemini**: Paste your Gemini API key (`AIza...`) and choose your model (e.g., `gemini-2.5-flash`).
+   - **Groq Cloud (Recommended)**: Paste your Groq API key (`gsk_...`) and choose your model (e.g., `llama-3.3-70b-versatile` or `llama-3.1-8b-instant`).
+   - **OpenAI**: Paste your OpenAI API key (`sk-proj-...` or `sk-...`) and choose your model (e.g., `gpt-4o-mini`, `gpt-4o`, `o3-mini`).
+   - **Anthropic Claude**: Paste your Claude API key (`sk-ant-...`) and choose your model (e.g., `claude-3-5-haiku-20241022` or `claude-3-7-sonnet-20250219`).
+   - **Google Gemini**: Paste your Gemini API key (`AIza...`) and choose your model (e.g., `gemini-2.0-flash` or `gemini-1.5-pro`).
 3. Click **Save Settings**. Your key is securely stored in your local browser storage.
 
 ### Step 7: Start Querying & Connect Your Own Database!
@@ -397,9 +399,20 @@ python3 sqlpilot/cli.py interactive
 
 ---
 
+### 🌐 Deploying to Vercel
+
+SQLPilot is 100% production-ready for zero-config deployment on Vercel:
+
+1. **Import your GitHub repository** at [vercel.com/new](https://vercel.com/new).
+2. Vercel automatically detects `vercel.json` and configures the Python serverless runtime and static CDN routes.
+3. *(Optional)* Add default API keys in Vercel **Environment Variables** (`GROQ_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `GEMINI_API_KEY`). Users can also enter their own keys directly in the web UI.
+4. Click **Deploy**. Your SQLPilot workspace will be live globally!
+
+---
+
 ### Running the Test Suite
 
-Run the full automated test suite (65 passing unit and integration tests):
+Run the full automated test suite (74 passing unit and integration tests):
 
 ```bash
 pytest tests/ --verbose

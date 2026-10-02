@@ -92,7 +92,6 @@ class TestPhase1WebFrontend(unittest.TestCase):
             'id="systemStateBadge"',
             'id="systemStateText"',
             # Sidebar
-            'id="btnNewQuery"',
             'id="schemaTree"',
             'id="tableCountBadge"',
             'id="schemaSearchInput"',

@@ -55,7 +55,12 @@ class SQLPilotWebService:
         target_db = db_path or settings.db_path
         if not target_db.exists():
             target_db.parent.mkdir(parents=True, exist_ok=True)
-            seed_sample_database(target_db)
+            source_seed = PROJECT_ROOT / "data" / "sample_store.db"
+            if source_seed.exists():
+                import shutil
+                shutil.copy2(source_seed, target_db)
+            else:
+                seed_sample_database(target_db)
 
         self.enforce_auth = enforce_auth
         self.auth_service = auth_service
@@ -454,9 +459,18 @@ class SQLPilotWebService:
             key = user_llm_config["api_key"].strip()
             model = user_llm_config.get("model", "").strip() or None
             try:
-                from sqlpilot.core.llm_provider import GeminiLLMProvider, GroqLLMProvider
+                from sqlpilot.core.llm_provider import (
+                    ClaudeLLMProvider,
+                    GeminiLLMProvider,
+                    GroqLLMProvider,
+                    OpenAILLMProvider,
+                )
                 if prov == "gemini":
                     active_llm = GeminiLLMProvider(api_key=key, model_name=model)
+                elif prov in ("openai", "chatgpt"):
+                    active_llm = OpenAILLMProvider(api_key=key, model_name=model)
+                elif prov in ("claude", "anthropic"):
+                    active_llm = ClaudeLLMProvider(api_key=key, model_name=model)
                 else:
                     active_llm = GroqLLMProvider(api_key=key, model_name=model)
             except Exception as e:

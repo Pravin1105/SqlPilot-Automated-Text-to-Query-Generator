@@ -22,7 +22,9 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from sqlpilot.web.api import SQLPilotWebService
 
-STATIC_DIR = Path(__file__).resolve().parent / "static"
+STATIC_DIR = PROJECT_ROOT / "public"
+if not STATIC_DIR.exists():
+    STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
 class SQLPilotHTTPRequestHandler(SimpleHTTPRequestHandler):
@@ -31,7 +33,13 @@ class SQLPilotHTTPRequestHandler(SimpleHTTPRequestHandler):
     service: Optional[SQLPilotWebService] = None
 
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, directory=str(STATIC_DIR), **kwargs)
+        directory = kwargs.pop("directory", None) or str(STATIC_DIR)
+        super().__init__(*args, directory=directory, **kwargs)
+
+    def _get_clean_path(self) -> str:
+        """Resolve clean API path considering reverse proxies and rewrites."""
+        raw_path = self.headers.get("x-forwarded-uri") or self.headers.get("x-matched-path") or self.path
+        return raw_path.split("?")[0].rstrip("/")
 
     def end_headers(self):
         self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
@@ -82,7 +90,7 @@ class SQLPilotHTTPRequestHandler(SimpleHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
-        clean_path = self.path.split("?")[0].rstrip("/")
+        clean_path = self._get_clean_path()
         svc = self.service or SQLPilotWebService()
         token = self._extract_token()
 
@@ -132,7 +140,7 @@ class SQLPilotHTTPRequestHandler(SimpleHTTPRequestHandler):
         return payload.get("user_llm_config")
 
     def do_POST(self):
-        clean_path = self.path.split("?")[0].rstrip("/")
+        clean_path = self._get_clean_path()
         svc = self.service or SQLPilotWebService()
         token = self._extract_token()
 

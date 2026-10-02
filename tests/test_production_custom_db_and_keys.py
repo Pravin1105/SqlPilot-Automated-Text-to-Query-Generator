@@ -336,6 +336,162 @@ class TestProductionCustomDBAndKeys(unittest.TestCase):
             )
             self.assertTrue(res.get("success"), res.get("error"))
 
+    def test_user_llm_config_openai_instantiation(self):
+        """Custom OpenAI API key and model override server defaults."""
+        user_config = {
+            "provider": "openai",
+            "api_key": "sk-proj-customOpenAIKey123",
+            "model": "gpt-4o-mini",
+        }
+
+        with patch("sqlpilot.core.llm_provider.OpenAILLMProvider") as mock_openai_cls:
+            mock_instance = MagicMock()
+            mock_openai_cls.return_value = mock_instance
+            mock_instance.generate_json.return_value = {
+                "sql": "SELECT COUNT(*) FROM inventory;",
+                "explanation": "Count inventory with OpenAI.",
+                "is_ambiguous": False,
+                "clarification_options": [],
+            }
+
+            res = self.service.generate_and_route(
+                question="How many items in inventory?",
+                token=self.token,
+                user_llm_config=user_config,
+            )
+
+            mock_openai_cls.assert_called_once_with(
+                api_key="sk-proj-customOpenAIKey123",
+                model_name="gpt-4o-mini",
+            )
+            self.assertTrue(res.get("success"), res.get("error"))
+
+    def test_user_llm_config_claude_instantiation(self):
+        """Custom Claude API key and model override server defaults."""
+        user_config = {
+            "provider": "claude",
+            "api_key": "sk-ant-customClaudeKey123",
+            "model": "claude-3-5-haiku-20241022",
+        }
+
+        with patch("sqlpilot.core.llm_provider.ClaudeLLMProvider") as mock_claude_cls:
+            mock_instance = MagicMock()
+            mock_claude_cls.return_value = mock_instance
+            mock_instance.generate_json.return_value = {
+                "sql": "SELECT sku FROM inventory;",
+                "explanation": "Get SKUs with Claude.",
+                "is_ambiguous": False,
+                "clarification_options": [],
+            }
+
+            res = self.service.generate_and_route(
+                question="List all SKUs",
+                token=self.token,
+                user_llm_config=user_config,
+            )
+
+            mock_claude_cls.assert_called_once_with(
+                api_key="sk-ant-customClaudeKey123",
+                model_name="claude-3-5-haiku-20241022",
+            )
+            self.assertTrue(res.get("success"), res.get("error"))
+
+    def test_openai_provider_generate_json_mock(self):
+        """OpenAILLMProvider formats payload correctly and parses JSON response."""
+        import io
+        import json
+        from sqlpilot.core.llm_provider import OpenAILLMProvider
+
+        provider = OpenAILLMProvider(api_key="sk-test-mock-key", model_name="gpt-4o-mini")
+
+        fake_resp_data = {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps({"sql": "SELECT 1;", "explanation": "test"})
+                    }
+                }
+            ]
+        }
+        mock_response = MagicMock()
+        mock_response.read.return_value = json.dumps(fake_resp_data).encode("utf-8")
+        mock_response.__enter__.return_value = mock_response
+
+        with patch("urllib.request.urlopen", return_value=mock_response) as mock_urlopen:
+            result = provider.generate_json("Test prompt", system_instruction="You are a SQL expert.")
+
+            self.assertEqual(result["sql"], "SELECT 1;")
+            self.assertEqual(result["explanation"], "test")
+
+            # Check request object
+            req_arg = mock_urlopen.call_args[0][0]
+            self.assertEqual(req_arg.get_header("Authorization"), "Bearer sk-test-mock-key")
+            body = json.loads(req_arg.data.decode("utf-8"))
+            self.assertEqual(body["model"], "gpt-4o-mini")
+            self.assertEqual(body["response_format"], {"type": "json_object"})
+            self.assertEqual(body["messages"][0]["role"], "system")
+            self.assertEqual(body["messages"][1]["role"], "user")
+
+    def test_openai_reasoning_model_developer_role(self):
+        """OpenAILLMProvider uses developer role and omits temperature for o1/o3 reasoning models."""
+        import json
+        from sqlpilot.core.llm_provider import OpenAILLMProvider
+
+        provider = OpenAILLMProvider(api_key="sk-test-mock-key", model_name="o3-mini")
+
+        fake_resp_data = {
+            "choices": [
+                {"message": {"content": json.dumps({"sql": "SELECT 2;", "explanation": "reasoning"})}}
+            ]
+        }
+        mock_response = MagicMock()
+        mock_response.read.return_value = json.dumps(fake_resp_data).encode("utf-8")
+        mock_response.__enter__.return_value = mock_response
+
+        with patch("urllib.request.urlopen", return_value=mock_response) as mock_urlopen:
+            result = provider.generate_json("Reasoning prompt", system_instruction="System prompt.")
+
+            self.assertEqual(result["sql"], "SELECT 2;")
+            req_arg = mock_urlopen.call_args[0][0]
+            body = json.loads(req_arg.data.decode("utf-8"))
+            self.assertEqual(body["model"], "o3-mini")
+            self.assertNotIn("temperature", body)
+            self.assertEqual(body["messages"][0]["role"], "developer")
+
+    def test_claude_provider_generate_json_mock(self):
+        """ClaudeLLMProvider formats payload correctly and parses JSON response."""
+        import json
+        from sqlpilot.core.llm_provider import ClaudeLLMProvider
+
+        provider = ClaudeLLMProvider(api_key="sk-ant-test-mock-key", model_name="claude-3-5-haiku-20241022")
+
+        fake_resp_data = {
+            "content": [
+                {
+                    "type": "text",
+                    "text": json.dumps({"sql": "SELECT * FROM users;", "explanation": "Claude query"}),
+                }
+            ]
+        }
+        mock_response = MagicMock()
+        mock_response.read.return_value = json.dumps(fake_resp_data).encode("utf-8")
+        mock_response.__enter__.return_value = mock_response
+
+        with patch("urllib.request.urlopen", return_value=mock_response) as mock_urlopen:
+            result = provider.generate_json("Show users", system_instruction="Output valid JSON.")
+
+            self.assertEqual(result["sql"], "SELECT * FROM users;")
+            self.assertEqual(result["explanation"], "Claude query")
+
+            req_arg = mock_urlopen.call_args[0][0]
+            self.assertEqual(req_arg.get_header("X-api-key"), "sk-ant-test-mock-key")
+            self.assertEqual(req_arg.get_header("Anthropic-version"), "2023-06-01")
+            body = json.loads(req_arg.data.decode("utf-8"))
+            self.assertEqual(body["model"], "claude-3-5-haiku-20241022")
+            self.assertEqual(body["max_tokens"], 2048)
+            self.assertIn("system", body)
+            self.assertEqual(body["messages"][0]["role"], "user")
+
     def test_server_extracts_user_llm_headers(self):
         """HTTP Request Handler extracts X-LLM-Api-Key, X-LLM-Provider, and X-LLM-Model headers."""
         handler = SQLPilotHTTPRequestHandler.__new__(SQLPilotHTTPRequestHandler)
