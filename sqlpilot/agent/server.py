@@ -80,7 +80,7 @@ class LocalAgentHTTPRequestHandler(SimpleHTTPRequestHandler):
         path = parsed.path.rstrip("/")
         svc = self.service or LocalAgentService()
 
-        if path in ("/agent/status", "/status", "/api/status"):
+        if path in ("", "/", "/agent/status", "/status", "/api/status"):
             self._send_json(200, svc.get_status())
             return
 
