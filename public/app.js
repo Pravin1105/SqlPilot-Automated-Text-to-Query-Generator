@@ -200,14 +200,14 @@
   const isLocalHost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
   const DEFAULT_AGENT_URL = (isDirectConsole || isLocalHost)
     ? `${window.location.protocol}//${window.location.host}`
-    : (window.location.protocol === "https:" ? "https://127.0.0.1:8765" : "http://localhost:8765");
+    : "http://127.0.0.1:8765";
 
   let localAgentUrl = (isDirectConsole || (isLocalHost && window.location.port === "8765"))
     ? window.location.origin
     : (localStorage.getItem("sqlpilot_local_agent_url") || DEFAULT_AGENT_URL);
 
-  // If running over plain HTTP, purge any stale HTTPS local agent URLs
-  if (window.location.protocol === "http:" && (localAgentUrl.startsWith("https://127.0.0.1") || localAgentUrl.startsWith("https://localhost"))) {
+  // Purge any stale HTTPS local agent URLs stored in localStorage
+  if (localAgentUrl.startsWith("https://127.0.0.1") || localAgentUrl.startsWith("https://localhost")) {
     localAgentUrl = localAgentUrl.replace(/^https:/, "http:");
     localStorage.setItem("sqlpilot_local_agent_url", localAgentUrl);
   }
@@ -571,9 +571,28 @@
           headers: { "Content-Type": "application/json" }
         });
       } catch (directErr) {
-        clearTimeout(timeoutId);
-        markLocalAgentOffline();
-        return false;
+        if (cleanUrl.includes("127.0.0.1")) {
+          try {
+            const altUrl = cleanUrl.replace("127.0.0.1", "localhost");
+            const altResp = await fetch(`${altUrl}/agent/status`, {
+              signal: controller.signal,
+              headers: { "Content-Type": "application/json" }
+            });
+            if (altResp && altResp.ok) {
+              resp = altResp;
+              cleanUrl = altUrl;
+              localAgentUrl = altUrl;
+              localStorage.setItem("sqlpilot_local_agent_url", localAgentUrl);
+            }
+          } catch (altErr) {
+            // failed
+          }
+        }
+        if (!resp) {
+          clearTimeout(timeoutId);
+          markLocalAgentOffline();
+          return false;
+        }
       }
       clearTimeout(timeoutId);
 
