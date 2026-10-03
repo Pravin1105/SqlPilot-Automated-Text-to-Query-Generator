@@ -57,6 +57,38 @@ class LocalAgentHTTPRequestHandler(SimpleHTTPRequestHandler):
         except json.JSONDecodeError:
             return {}
 
+    def _read_file_upload(self) -> tuple:
+        """Read uploaded SQLite file bytes and filename from request."""
+        content_type = self.headers.get("Content-Type", "")
+        content_len = int(self.headers.get("Content-Length", 0))
+        if content_len == 0:
+            return "", b""
+
+        # 1. Direct binary / stream upload with X-Filename header
+        filename = (
+            self.headers.get("X-Filename")
+            or self.headers.get("X-File-Name")
+            or self.headers.get("X-Database-Name")
+            or ""
+        )
+        if "octet-stream" in content_type or filename:
+            file_bytes = self.rfile.read(content_len)
+            return filename or "database.db", file_bytes
+
+        # 2. Standard multipart/form-data upload
+        if "multipart/form-data" in content_type:
+            raw_data = self.rfile.read(content_len)
+            import email
+            msg_str = b"Content-Type: " + content_type.encode() + b"\r\n\r\n" + raw_data
+            msg = email.message_from_bytes(msg_str)
+            for part in msg.walk():
+                fn = part.get_filename()
+                if fn:
+                    return fn, part.get_payload(decode=True)
+            return "uploaded.db", raw_data
+
+        return filename or "uploaded.db", self.rfile.read(content_len)
+
     def parse_request(self):
         """Intercept non-HTTP binary requests (e.g. HTTPS ClientHello) before BaseHTTPRequestHandler corrupts terminal."""
         if not hasattr(self, "raw_requestline") or not self.raw_requestline:
@@ -190,6 +222,16 @@ class LocalAgentHTTPRequestHandler(SimpleHTTPRequestHandler):
             payload = self._read_json()
             db_path = payload.get("db_path", "")
             res = svc.connect(db_path)
+            status_code = 200 if res.get("success") else 400
+            self._send_json(status_code, res)
+            return
+
+        elif path in ("/agent/upload", "/upload"):
+            filename, file_bytes = self._read_file_upload()
+            if not file_bytes:
+                self._send_json(400, {"success": False, "error": "No database file bytes received."})
+                return
+            res = svc.connect_bytes(filename, file_bytes)
             status_code = 200 if res.get("success") else 400
             self._send_json(status_code, res)
             return

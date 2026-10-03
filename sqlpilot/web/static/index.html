@@ -379,6 +379,30 @@
         </div>
 
         <div class="form-group">
+          <label class="form-label">Select SQLite Database File (.db, .sqlite, .sqlite3)</label>
+          <div id="fileDropzone" style="border: 2px dashed rgba(255, 255, 255, 0.2); border-radius: 6px; padding: 18px 12px; text-align: center; cursor: pointer; transition: all 0.2s ease; background: rgba(0, 0, 0, 0.15);">
+            <input type="file" id="dbFileInput" accept=".db,.sqlite,.sqlite3" style="display: none;">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin: 0 auto 6px; color: var(--accent-active); display: block;">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="17 8 12 3 7 8"></polyline>
+              <line x1="12" y1="3" x2="12" y2="15"></line>
+            </svg>
+            <div id="dropzoneText" style="font-size: 13px; color: var(--text-white); font-weight: 500;">
+              Click to choose SQLite file or drag &amp; drop here
+            </div>
+            <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">
+              Direct to Local Agent (127.0.0.1) &mdash; never sent to Vercel
+            </div>
+          </div>
+        </div>
+
+        <div style="display: flex; align-items: center; margin: 10px 0; gap: 8px;">
+          <div style="flex: 1; height: 1px; background: rgba(255,255,255,0.1);"></div>
+          <span style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">or enter local path</span>
+          <div style="flex: 1; height: 1px; background: rgba(255,255,255,0.1);"></div>
+        </div>
+
+        <div class="form-group">
           <label for="inputLocalDbPath" class="form-label">Local SQLite Database File Path</label>
           <input type="text" id="inputLocalDbPath" class="form-input" placeholder="/path/to/my_store.db">
         </div>

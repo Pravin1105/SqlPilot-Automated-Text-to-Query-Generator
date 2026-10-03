@@ -92,6 +92,36 @@ class LocalAgentService:
                 "error": f"Failed to connect to database: {str(e)}",
             }
 
+    def connect_bytes(self, filename: str, file_bytes: bytes) -> Dict[str, Any]:
+        """Save database bytes directly on the local machine and connect to it."""
+        if not filename:
+            filename = "uploaded.db"
+        clean_name = Path(filename).name
+        if not clean_name.endswith((".db", ".sqlite", ".sqlite3")):
+            clean_name += ".db"
+
+        # Validate SQLite magic header (first 16 bytes: 'SQLite format 3\x00')
+        SQLITE_HEADER = b"SQLite format 3\x00"
+        if len(file_bytes) < 16 or not file_bytes.startswith(SQLITE_HEADER):
+            return {
+                "success": False,
+                "error": "Invalid SQLite database file. The uploaded file is missing the standard SQLite 3 header.",
+            }
+
+        # Save to local agent data/uploads folder
+        upload_dir = BASE_DIR / "data" / "uploads"
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        target_path = upload_dir / clean_name
+        try:
+            target_path.write_bytes(file_bytes)
+        except Exception as e:
+            return {"success": False, "error": f"Failed to save local database file: {str(e)}"}
+
+        res = self.connect(target_path)
+        if res.get("success"):
+            res["message"] = f"Successfully transferred and connected local database '{clean_name}'."
+        return res
+
     def get_status(self) -> Dict[str, Any]:
         """Return local agent status and database information."""
         connected = bool(self.db_path and self.db_path.exists() and self.executor is not None)

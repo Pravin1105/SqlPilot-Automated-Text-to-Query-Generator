@@ -1321,6 +1321,13 @@
     if (elements.inputLocalAgentUrl) {
       elements.inputLocalAgentUrl.value = localAgentUrl;
     }
+    selectedUploadFile = null;
+    if (elements.dbFileInput) {
+      elements.dbFileInput.value = "";
+    }
+    if (elements.dropzoneText) {
+      elements.dropzoneText.textContent = "Click to choose SQLite file or drag & drop here";
+    }
     if (elements.btnUploadSubmit) {
       elements.btnUploadSubmit.disabled = false;
       elements.btnUploadSubmit.textContent = "Connect Local Database";
@@ -1349,14 +1356,30 @@
 
     if (elements.btnUploadSubmit) {
       elements.btnUploadSubmit.disabled = true;
-      elements.btnUploadSubmit.textContent = "Connecting to Local Agent...";
+      elements.btnUploadSubmit.textContent = selectedUploadFile ? "Uploading to Local Agent..." : "Connecting to Local Agent...";
     }
     if (elements.uploadErrorBox) {
       elements.uploadErrorBox.classList.add("hidden");
     }
 
     try {
-      if (dbPathInput) {
+      if (selectedUploadFile) {
+        if (elements.btnUploadSubmit) {
+          elements.btnUploadSubmit.textContent = `Uploading ${selectedUploadFile.name} to Local Agent...`;
+        }
+        const uploadResp = await fetch(`${agentUrl}/agent/upload`, {
+          method: "POST",
+          headers: {
+            "X-Filename": selectedUploadFile.name,
+            "Content-Type": "application/octet-stream"
+          },
+          body: selectedUploadFile
+        });
+        const uploadData = await uploadResp.json();
+        if (!uploadResp.ok || !uploadData.success) {
+          throw new Error(uploadData.error || `Could not upload database to local agent (${uploadResp.status})`);
+        }
+      } else if (dbPathInput) {
         // Instruct local agent to connect to specified SQLite file
         const connResp = await fetch(`${agentUrl}/agent/connect`, {
           method: "POST",
@@ -1459,6 +1482,64 @@
     if (elements.uploadModal) {
       elements.uploadModal.addEventListener("click", (e) => {
         if (e.target === elements.uploadModal) closeUploadModal();
+      });
+    }
+
+    // Direct file picker / dropzone for Local Agent
+    if (elements.fileDropzone && elements.dbFileInput) {
+      elements.fileDropzone.addEventListener("click", () => {
+        elements.dbFileInput.click();
+      });
+
+      elements.dbFileInput.addEventListener("change", (e) => {
+        if (e.target.files && e.target.files[0]) {
+          selectedUploadFile = e.target.files[0];
+          if (elements.dropzoneText) {
+            elements.dropzoneText.textContent = `Selected: ${selectedUploadFile.name} (${(selectedUploadFile.size / 1024).toFixed(1)} KB)`;
+          }
+          if (elements.inputLocalDbPath) {
+            elements.inputLocalDbPath.value = "";
+          }
+        }
+      });
+
+      elements.fileDropzone.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        elements.fileDropzone.style.borderColor = "var(--accent-active)";
+        elements.fileDropzone.style.background = "rgba(139, 154, 110, 0.25)";
+      });
+
+      elements.fileDropzone.addEventListener("dragleave", (e) => {
+        e.preventDefault();
+        elements.fileDropzone.style.borderColor = "rgba(255,255,255,0.2)";
+        elements.fileDropzone.style.background = "rgba(0,0,0,0.15)";
+      });
+
+      elements.fileDropzone.addEventListener("drop", (e) => {
+        e.preventDefault();
+        elements.fileDropzone.style.borderColor = "rgba(255,255,255,0.2)";
+        elements.fileDropzone.style.background = "rgba(0,0,0,0.15)";
+        if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]) {
+          selectedUploadFile = e.dataTransfer.files[0];
+          if (elements.dropzoneText) {
+            elements.dropzoneText.textContent = `Selected: ${selectedUploadFile.name} (${(selectedUploadFile.size / 1024).toFixed(1)} KB)`;
+          }
+          if (elements.inputLocalDbPath) {
+            elements.inputLocalDbPath.value = "";
+          }
+        }
+      });
+    }
+
+    if (elements.inputLocalDbPath) {
+      elements.inputLocalDbPath.addEventListener("input", () => {
+        if (elements.inputLocalDbPath.value.trim()) {
+          selectedUploadFile = null;
+          if (elements.dbFileInput) elements.dbFileInput.value = "";
+          if (elements.dropzoneText) {
+            elements.dropzoneText.textContent = "Click to choose SQLite file or drag & drop here";
+          }
+        }
       });
     }
 

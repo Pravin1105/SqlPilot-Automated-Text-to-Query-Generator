@@ -12,6 +12,7 @@ __pycache__/
 data/*.db
 !data/sample_store.db
 data/user_databases/
+data/uploads/
 SQLPilot_project_docs/
 
 # macOS System Files

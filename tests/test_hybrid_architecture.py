@@ -333,6 +333,44 @@ class TestHybridArchitecture(unittest.TestCase):
         self.assertTrue(data.get("success"))
         self.assertEqual(data.get("affected_rows"), 1)
 
+        # 6. POST /agent/upload (direct browser-to-agent file streaming)
+        valid_sqlite_bytes = self.db_path.read_bytes()
+        req_lines = [
+            "POST /agent/upload HTTP/1.1",
+            "Host: 127.0.0.1:8765",
+            f"Content-Length: {len(valid_sqlite_bytes)}",
+            "Content-Type: application/octet-stream",
+            "X-Filename: uploaded_test.db",
+            "",
+            "",
+        ]
+        req_bytes = "\r\n".join(req_lines).encode("utf-8") + valid_sqlite_bytes
+        sock = MockSocket(req_bytes)
+        LocalAgentHTTPRequestHandler(sock, ("127.0.0.1", 8765), None)
+        resp_str = sock.wfile.getvalue().decode("utf-8", errors="ignore")
+        header_part, _, body_part = resp_str.partition("\r\n\r\n")
+        status_code = int(header_part.splitlines()[0].split()[1])
+        upload_data = json.loads(body_part) if body_part else {}
+        self.assertEqual(status_code, 200)
+        self.assertTrue(upload_data.get("success"))
+        self.assertEqual(upload_data.get("database"), "uploaded_test.db")
+        self.assertEqual(len(upload_data.get("schema", {}).get("tables", [])), 2)
+
+    def test_connect_bytes_validation(self):
+        """LocalAgentService.connect_bytes must reject invalid SQLite headers and accept valid ones."""
+        agent = LocalAgentService()
+        # Invalid SQLite header
+        res_invalid = agent.connect_bytes("corrupt.db", b"Not a real SQLite file")
+        self.assertFalse(res_invalid.get("success"))
+        self.assertIn("SQLite 3 header", res_invalid.get("error", ""))
+
+        # Valid SQLite header
+        valid_bytes = self.db_path.read_bytes()
+        res_valid = agent.connect_bytes("valid.db", valid_bytes)
+        self.assertTrue(res_valid.get("success"))
+        self.assertEqual(res_valid.get("database"), "valid.db")
+        self.assertEqual(len(res_valid.get("schema", {}).get("tables", [])), 2)
+
     def test_expanduser_path_handling(self):
         """LocalAgentService must expand ~/... paths safely using Path(db_path).expanduser().resolve()."""
         agent = LocalAgentService(db_path=self.db_path)
