@@ -36,7 +36,7 @@ class LocalAgentService:
     """Authoritative local service handling SQLite access, schema extraction, and execution."""
 
     def __init__(self, db_path: Optional[Union[str, Path]] = None):
-        target_db = Path(db_path) if db_path else settings.db_path
+        target_db = Path(db_path).expanduser().resolve() if db_path else settings.db_path
         if not target_db.exists():
             target_db.parent.mkdir(parents=True, exist_ok=True)
             source_seed = BASE_DIR / "data" / "sample_store.db"
@@ -67,7 +67,9 @@ class LocalAgentService:
 
     def connect(self, db_path: Union[str, Path]) -> Dict[str, Any]:
         """Connect to a local SQLite database file."""
-        target = Path(db_path)
+        if not db_path:
+            return {"success": False, "error": "Database path cannot be empty."}
+        target = Path(db_path).expanduser().resolve()
         if not target.exists() or not target.is_file():
             return {
                 "success": False,
@@ -105,7 +107,7 @@ class LocalAgentService:
         }
 
     def get_schema(self) -> Dict[str, Any]:
-        """Extract and return schema metadata only (zero row values)."""
+        """Extract and return schema metadata only (zero row values, zero absolute paths to cloud)."""
         if not self.schema:
             if self.inspector:
                 try:
@@ -118,7 +120,7 @@ class LocalAgentService:
         return {
             "success": True,
             "database": self.db_path.name if self.db_path else "database.db",
-            "database_path": str(self.db_path.resolve()) if self.db_path else "",
+            "database_path": "localhost (local agent)",
             "tables": [t.to_dict() for t in self.schema.tables.values()],
         }
 

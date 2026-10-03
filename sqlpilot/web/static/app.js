@@ -443,6 +443,39 @@
     setSystemState("Switching DB...");
 
     try {
+      if (isLocalAgentConnected) {
+        // Architecture invariant: Local Agent owns database connection & schema extraction
+        const cleanUrl = getValidAgentUrl(localAgentUrl);
+        const connResp = await fetch(`${cleanUrl}/agent/connect`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: jsonSafe({ db_path: targetDb })
+        });
+        const connData = await connResp.json();
+        if (connResp.ok && connData.success && connData.schema) {
+          localSchema = connData.schema;
+          loadedTables = connData.schema.tables || [];
+          renderSchemaTree(loadedTables);
+
+          // Synchronize schema metadata to Vercel for Schema RAG & LLM prompt
+          try {
+            await fetchWithAuth("/api/schema/sync", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: jsonSafe({ schema: connData.schema })
+            });
+          } catch (syncErr) {
+            console.warn("[LocalAgent] Schema sync skipped:", syncErr);
+          }
+
+          resetSession();
+          setSystemState("Ready");
+          showToast(`Switched to local database: ${connData.database || targetDb}`, "success");
+          return;
+        }
+      }
+
+      // If switching among already synced schemas on Vercel
       const resp = await fetchWithAuth("/api/database/switch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -513,6 +546,18 @@
     return trimmed;
   }
 
+  function markLocalAgentOffline() {
+    isLocalAgentConnected = false;
+    if (elements.agentStateLabel) {
+      elements.agentStateLabel.textContent = "Offline (127.0.0.1:8765)";
+      elements.agentStateLabel.style.color = "var(--accent-danger)";
+    }
+    if (elements.connectionStateLabel) {
+      elements.connectionStateLabel.textContent = "Offline";
+      elements.connectionStateLabel.className = "status-text disconnected";
+    }
+  }
+
   // --- Local Agent Interaction (Hybrid Cloud/Local Architecture) ---
   async function checkLocalAgent() {
     let cleanUrl = getValidAgentUrl(localAgentUrl);
@@ -526,18 +571,9 @@
           headers: { "Content-Type": "application/json" }
         });
       } catch (directErr) {
-        // Fallback: If direct port 8765 is blocked by browser restrictions, check server proxy
-        try {
-          resp = await fetch("/agent/status", {
-            signal: controller.signal,
-            headers: { "Content-Type": "application/json" }
-          });
-          if (resp && resp.ok) {
-            cleanUrl = window.location.origin;
-          }
-        } catch (proxyErr) {
-          // Both failed
-        }
+        clearTimeout(timeoutId);
+        markLocalAgentOffline();
+        return false;
       }
       clearTimeout(timeoutId);
 
@@ -562,7 +598,7 @@
           try {
             sResp = await fetch(`${cleanUrl}/agent/schema`);
           } catch (e) {
-            sResp = await fetch("/agent/schema");
+            sResp = null;
           }
 
           if (sResp && sResp.ok) {
@@ -918,20 +954,11 @@
         showLoading("Executing query locally via SQLite (zero data leaves localhost)...");
         try {
           const cleanUrl = getValidAgentUrl(localAgentUrl);
-          let execResp;
-          try {
-            execResp = await fetch(`${cleanUrl}/agent/execute`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: jsonSafe({ sql: data.sql })
-            });
-          } catch (e) {
-            execResp = await fetch("/agent/execute", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: jsonSafe({ sql: data.sql })
-            });
-          }
+          const execResp = await fetch(`${cleanUrl}/agent/execute`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: jsonSafe({ sql: data.sql })
+          });
           const execData = await execResp.json();
           if (!execResp.ok || !execData.success) {
             hideLoading();
@@ -1007,32 +1034,13 @@
     setSystemState("Executing Modification...");
 
     try {
-      let data;
-      if (isLocal) {
-        const cleanUrl = getValidAgentUrl(localAgentUrl);
-        let resp;
-        try {
-          resp = await fetch(`${cleanUrl}/agent/approve`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: jsonSafe({ sql, token })
-          });
-        } catch (e) {
-          resp = await fetch("/agent/approve", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: jsonSafe({ sql, token })
-          });
-        }
-        data = await resp.json();
-      } else {
-        const resp = await fetchWithAuth("/api/query/approve", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: jsonSafe({ token, sql })
-        });
-        data = await resp.json();
-      }
+      const cleanUrl = getValidAgentUrl(localAgentUrl);
+      const resp = await fetch(`${cleanUrl}/agent/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: jsonSafe({ sql, token })
+      });
+      const data = await resp.json();
 
       if (!data || !data.success) {
         hideLoading();

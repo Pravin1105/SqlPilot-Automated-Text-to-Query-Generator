@@ -228,27 +228,28 @@ class SQLPilotWebService:
                 "status": self.get_status(token=token),
             }
 
-        # If target file exists locally (e.g. in test fixtures), extract its schema metadata ONLY
-        p = Path(clean_db)
-        if p.exists() and p.is_file():
-            try:
-                from sqlpilot.core.schema_inspector import SchemaInspector
-                inspector = SchemaInspector(p)
-                schema = inspector.inspect()
-                self.synced_schemas[clean_name] = schema
-                self.active_synced_schema = schema
-                return {
-                    "success": True,
-                    "message": f"Successfully loaded schema metadata for '{clean_name}'.",
-                    "database": clean_name,
-                    "status": self.get_status(token=token),
-                }
-            except Exception as e:
-                return {"success": False, "error": f"Failed to inspect schema metadata: {str(e)}"}
+        # In offline unit tests only (when not running on Vercel), allow inspecting local test fixtures
+        if os.environ.get("VERCEL") != "1":
+            p = Path(clean_db).expanduser().resolve()
+            if p.exists() and p.is_file():
+                try:
+                    from sqlpilot.core.schema_inspector import SchemaInspector
+                    inspector = SchemaInspector(p)
+                    schema = inspector.inspect()
+                    self.synced_schemas[clean_name] = schema
+                    self.active_synced_schema = schema
+                    return {
+                        "success": True,
+                        "message": f"Successfully loaded schema metadata for '{clean_name}'.",
+                        "database": clean_name,
+                        "status": self.get_status(token=token),
+                    }
+                except Exception as e:
+                    return {"success": False, "error": f"Failed to inspect schema metadata: {str(e)}"}
 
         return {
             "success": False,
-            "error": f"Database schema '{clean_name}' not found. Please sync it via your local agent.",
+            "error": f"Database schema '{clean_name}' not synced on Vercel. Please connect your database via your local agent (POST http://127.0.0.1:8765/agent/connect).",
             "status_code": 404,
         }
 
@@ -323,8 +324,16 @@ class SQLPilotWebService:
 
         try:
             actual_data = schema_data.get("schema") if (isinstance(schema_data.get("schema"), dict)) else schema_data
-            schema = DatabaseSchema.from_dict(actual_data)
-            db_name = actual_data.get("database") or (Path(schema.database_path).name if schema.database_path else "local.db")
+            if not isinstance(actual_data, dict):
+                return {"success": False, "error": "Invalid schema data format."}
+
+            sanitized_data = {
+                "database": actual_data.get("database") or "local.db",
+                "database_path": "localhost (local agent)",
+                "tables": actual_data.get("tables", []),
+            }
+            schema = DatabaseSchema.from_dict(sanitized_data)
+            db_name = sanitized_data["database"]
             self.synced_schemas[db_name] = schema
             self.active_synced_schema = schema
             return {

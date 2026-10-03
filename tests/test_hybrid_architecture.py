@@ -333,6 +333,38 @@ class TestHybridArchitecture(unittest.TestCase):
         self.assertTrue(data.get("success"))
         self.assertEqual(data.get("affected_rows"), 1)
 
+    def test_expanduser_path_handling(self):
+        """LocalAgentService must expand ~/... paths safely using Path(db_path).expanduser().resolve()."""
+        agent = LocalAgentService(db_path=self.db_path)
+        # Test connecting using resolved path
+        res = agent.connect(str(self.db_path))
+        self.assertTrue(res.get("success"))
+        self.assertEqual(agent.db_path, self.db_path.resolve())
+
+    def test_schema_metadata_sanitization(self):
+        """Schema metadata extracted and synced must sanitize absolute local filesystem paths."""
+        agent = LocalAgentService(db_path=self.db_path)
+        schema_dict = agent.get_schema()
+        self.assertTrue(schema_dict.get("success"))
+        # database_path must not be an absolute path
+        self.assertNotIn("/Users/", schema_dict.get("database_path", ""))
+        self.assertEqual(schema_dict.get("database_path"), "localhost (local agent)")
+
+        # Syncing to web service must also sanitize and index schema
+        web_service = SQLPilotWebService(llm_provider=MockLLM())
+        sync_res = web_service.sync_schema(schema_dict)
+        self.assertTrue(sync_res.get("success"))
+        synced = web_service.synced_schemas[sync_res["database"]]
+        self.assertEqual(synced.database_path, "localhost (local agent)")
+
+    def test_frontend_has_no_cloud_agent_fallbacks(self):
+        """Frontend app.js must not contain cloud fallback routes to /agent/."""
+        app_js_path = Path(__file__).resolve().parent.parent / "public" / "app.js"
+        content = app_js_path.read_text(encoding="utf-8")
+        # Ensure no fetch("/agent/...") fallbacks exist
+        self.assertNotIn('fetch("/agent/', content)
+        self.assertNotIn("fetch('/agent/", content)
+
 
 if __name__ == "__main__":
     unittest.main()

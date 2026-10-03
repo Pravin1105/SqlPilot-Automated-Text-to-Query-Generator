@@ -329,8 +329,8 @@ def run_agent_server(
     key_file: Optional[str] = None,
     open_browser: bool = True,
 ):
-    """Run the Local SQLPilot Agent HTTP(S) server."""
-    svc = service or LocalAgentService(db_path=db_path)
+    resolved_db = str(Path(db_path).expanduser().resolve()) if db_path else None
+    svc = service or LocalAgentService(db_path=resolved_db)
     LocalAgentHTTPRequestHandler.service = svc
     server_address = (host, port)
     httpd = ReusableThreadingHTTPServer(server_address, LocalAgentHTTPRequestHandler)

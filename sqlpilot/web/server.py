@@ -145,19 +145,6 @@ class SQLPilotHTTPRequestHandler(SimpleHTTPRequestHandler):
             self._send_json(status_code, result)
             return
 
-        elif clean_path.startswith("/agent/"):
-            # Proxy to local agent running on 127.0.0.1:8765 if requested via web server
-            try:
-                import urllib.request
-                req = urllib.request.Request(f"http://127.0.0.1:8765{clean_path}")
-                with urllib.request.urlopen(req, timeout=3) as resp:
-                    data = json.loads(resp.read().decode("utf-8"))
-                    self._send_json(resp.status, data)
-                    return
-            except Exception as e:
-                self._send_json(502, {"error": f"Could not reach Local Agent at 127.0.0.1:8765: {str(e)}", "connected": False})
-                return
-
         # Serve static assets
         super().do_GET()
 
@@ -257,25 +244,6 @@ class SQLPilotHTTPRequestHandler(SimpleHTTPRequestHandler):
             status_code = 200 if result.get("success", False) else result.get("status_code", 400)
             self._send_json(status_code, result)
             return
-
-        elif clean_path.startswith("/agent/"):
-            # Proxy to local agent running on 127.0.0.1:8765 if requested via web server
-            try:
-                import urllib.request
-                payload = self._read_json()
-                req_data = json.dumps(payload).encode("utf-8")
-                req = urllib.request.Request(
-                    f"http://127.0.0.1:8765{clean_path}",
-                    data=req_data,
-                    headers={"Content-Type": "application/json"}
-                )
-                with urllib.request.urlopen(req, timeout=15) as resp:
-                    data = json.loads(resp.read().decode("utf-8"))
-                    self._send_json(resp.status, data)
-                    return
-            except Exception as e:
-                self._send_json(502, {"error": f"Could not reach Local Agent at 127.0.0.1:8765: {str(e)}", "success": False})
-                return
 
         self._send_json(404, {"error": f"API route not found: {self.path}"})
 
