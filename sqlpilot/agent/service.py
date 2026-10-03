@@ -8,10 +8,23 @@ Responsible for:
 5. Returning query results directly to the browser UI without routing records through Vercel.
 """
 
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
-from config import settings, BASE_DIR
+# Ensure repo root is always in sys.path so config can be imported from any working directory
+_repo_root = Path(__file__).resolve().parent.parent.parent
+if str(_repo_root) not in sys.path:
+    sys.path.insert(0, str(_repo_root))
+
+try:
+    from config import settings, BASE_DIR
+except ImportError:
+    BASE_DIR = _repo_root
+    class _SettingsFallback:
+        db_path = BASE_DIR / "data" / "sample_store.db"
+    settings = _SettingsFallback()
+
 from sqlpilot.core.execution_engine import ExecutionEngine, ExecutionResult
 from sqlpilot.core.safety_engine import SafetyEngine, SafetyLevel
 from sqlpilot.core.schema_inspector import DatabaseSchema, SchemaInspector

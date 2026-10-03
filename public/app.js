@@ -196,8 +196,11 @@
   let sessionToken = localStorage.getItem("sqlpilot_session_token") || "";
   let currentUser = null;
   let loadedTables = [];
-  let pendingApprovalState = null;
-  let localAgentUrl = localStorage.getItem("sqlpilot_local_agent_url") || "http://127.0.0.1:8765";
+  const DEFAULT_AGENT_URL = window.location.protocol === "https:" ? "https://127.0.0.1:8765" : "http://127.0.0.1:8765";
+  let localAgentUrl = localStorage.getItem("sqlpilot_local_agent_url") || DEFAULT_AGENT_URL;
+  if (window.location.protocol === "https:" && localAgentUrl === "http://127.0.0.1:8765") {
+    localAgentUrl = "https://127.0.0.1:8765";
+  }
   let localSchema = null;
   let isLocalAgentConnected = false;
   let recentQueries = [
@@ -1301,9 +1304,15 @@
 
       const connected = await checkLocalAgent();
       if (!connected) {
-        throw new Error(
-          `Local Agent at ${agentUrl} is unreachable. Please start it on your machine:\npython -m sqlpilot.agent`
-        );
+        let msg = `Local Agent at ${agentUrl} is unreachable. Please make sure your agent is running.`;
+        if (window.location.protocol === "https:" && agentUrl.startsWith("http:")) {
+          msg += "\n\nNote: If hosted on HTTPS (Vercel), browsers block HTTP (Mixed Content).\n" +
+                 "Options:\n" +
+                 "1. Run with SSL: ./run_agent.sh --ssl --db ...\n" +
+                 "2. Or in URL bar: Site settings -> allow 'Insecure content'\n" +
+                 "3. Or tunnel: npx localtunnel --port 8765";
+        }
+        throw new Error(msg);
       }
 
       closeUploadModal();

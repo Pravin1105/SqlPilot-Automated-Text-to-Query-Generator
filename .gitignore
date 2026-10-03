@@ -19,3 +19,4 @@ SQLPilot_project_docs/
 
 # Environment / API Keys
 .env
+.certs/
