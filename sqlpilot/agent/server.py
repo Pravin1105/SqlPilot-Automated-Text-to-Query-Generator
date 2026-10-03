@@ -56,6 +56,19 @@ class LocalAgentHTTPRequestHandler(SimpleHTTPRequestHandler):
         except json.JSONDecodeError:
             return {}
 
+    def log_error(self, format, *args):
+        """Format errors with helpful troubleshooting hints for TLS/HTTPS mismatches."""
+        if args and any("\x16" in str(a) or "\\x16" in str(a) for a in args):
+            print("\n" + "=" * 60)
+            print(" [SQLPilot Notice] Received HTTPS/TLS connection on plain HTTP port.")
+            print(" -> Your browser is connecting from an HTTPS site (Vercel).")
+            print(" -> Please restart your agent with SSL enabled:")
+            print("    ./run_agent.sh --ssl --db <path-to-db>")
+            print("    (or python -m sqlpilot.agent --ssl --db <path-to-db>)")
+            print("=" * 60 + "\n")
+            return
+        super().log_error(format, *args)
+
     def do_OPTIONS(self):
         """Handle CORS preflight with Chromium Private Network Access support."""
         self.send_response(204)
