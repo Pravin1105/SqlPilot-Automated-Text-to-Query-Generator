@@ -75,12 +75,49 @@ class LocalAgentHTTPRequestHandler(SimpleHTTPRequestHandler):
         self._send_cors_headers()
         self.end_headers()
 
+    def _serve_static_file(self, rel_path: str) -> bool:
+        """Serve frontend static files (HTML, CSS, JS) from the public/ directory."""
+        clean_path = rel_path.split("?")[0].lstrip("/")
+        if clean_path in ("", "index.html"):
+            clean_path = "index.html"
+
+        static_dir = Path(__file__).resolve().parent.parent.parent / "public"
+        file_path = (static_dir / clean_path).resolve()
+
+        # Prevent directory traversal
+        if not str(file_path).startswith(str(static_dir)) or not file_path.is_file():
+            return False
+
+        content_types = {
+            ".html": "text/html; charset=utf-8",
+            ".css": "text/css; charset=utf-8",
+            ".js": "application/javascript; charset=utf-8",
+            ".json": "application/json; charset=utf-8",
+            ".png": "image/png",
+            ".svg": "image/svg+xml",
+            ".ico": "image/x-icon",
+        }
+        content_type = content_types.get(file_path.suffix.lower(), "application/octet-stream")
+
+        try:
+            content = file_path.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(content)))
+            self._send_cors_headers()
+            self.end_headers()
+            self.wfile.write(content)
+            return True
+        except Exception:
+            return False
+
     def do_GET(self):
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/")
         svc = self.service or LocalAgentService()
 
-        if path in ("", "/", "/agent/status", "/status", "/api/status"):
+        # 1. API routes
+        if path in ("/agent/status", "/status", "/api/status"):
             self._send_json(200, svc.get_status())
             return
 
@@ -90,6 +127,19 @@ class LocalAgentHTTPRequestHandler(SimpleHTTPRequestHandler):
 
         elif path in ("/agent/ping", "/ping"):
             self._send_json(200, {"pong": True, "agent": "sqlpilot-local"})
+            return
+
+        elif path in ("/api/auth/me", "/auth/me"):
+            self._send_json(200, {"success": True, "user": {"username": "local_user", "role": "admin"}})
+            return
+
+        elif path in ("/api/databases", "/databases"):
+            db_name = svc.db_path.name if svc.db_path else "local.db"
+            self._send_json(200, {"success": True, "databases": [{"name": db_name, "is_authorized": True, "is_current": True}]})
+            return
+
+        # 2. Serve static UI files (index.html, styles.css, app.js)
+        if self._serve_static_file(parsed.path):
             return
 
         self._send_json(404, {"error": f"Local agent endpoint not found: {self.path}"})
@@ -121,6 +171,51 @@ class LocalAgentHTTPRequestHandler(SimpleHTTPRequestHandler):
             sql = payload.get("sql", "")
             token = payload.get("token", "")
             res = svc.approve_and_execute(sql, token=token)
+            status_code = 200 if res.get("success") else 400
+            self._send_json(status_code, res)
+            return
+
+        elif path in ("/api/auth/login", "/auth/login"):
+            self._send_json(200, {"success": True, "token": "local-session", "user": {"username": "local_user", "role": "admin"}})
+            return
+
+        elif path in ("/api/auth/logout", "/auth/logout"):
+            self._send_json(200, {"success": True})
+            return
+
+        elif path in ("/api/schema/sync", "/schema/sync"):
+            self._send_json(200, {"success": True, "message": "Schema synchronized locally."})
+            return
+
+        elif path in ("/api/database/switch", "/database/switch"):
+            payload = self._read_json()
+            db_name = payload.get("database", "")
+            res = svc.connect(db_name)
+            status_code = 200 if res.get("success") else 400
+            self._send_json(status_code, res)
+            return
+
+        elif path in ("/api/query/generate", "/api/generate", "/query/generate"):
+            from sqlpilot.web.api import SQLPilotWebService
+            web_svc = SQLPilotWebService()
+            payload = self._read_json()
+            question = payload.get("question", "")
+            user_llm = payload.get("user_llm_config")
+            if not user_llm:
+                api_key = self.headers.get("X-LLM-Api-Key", "")
+                if api_key:
+                    user_llm = {
+                        "api_key": api_key,
+                        "provider": self.headers.get("X-LLM-Provider", "groq"),
+                        "model": self.headers.get("X-LLM-Model", ""),
+                    }
+            schema_meta = payload.get("schema") or (svc.get_schema() if svc else None)
+            res = web_svc.generate_and_route(
+                question,
+                schema_metadata=schema_meta,
+                user_llm_config=user_llm,
+                execute_cloud=False,
+            )
             status_code = 200 if res.get("success") else 400
             self._send_json(status_code, res)
             return
@@ -194,7 +289,7 @@ def run_agent_server(
     service: Optional[LocalAgentService] = None,
     use_ssl: bool = False,
     cert_file: Optional[str] = None,
-    key_file: Optional[str] = None,
+    open_browser: bool = True,
 ):
     """Run the Local SQLPilot Agent HTTP(S) server."""
     svc = service or LocalAgentService(db_path=db_path)
@@ -214,15 +309,23 @@ def run_agent_server(
         protocol = "https"
 
     print("=" * 60)
-    print(" SQLPilot Local Agent — Hybrid Architecture Active")
-    print(f" Agent Address:  {protocol}://{host}:{port}")
+    print(" SQLPilot Web & Local Agent Active!")
+    print(f" Web Console:    {protocol}://{host}:{port}")
     print(f" Local Database: {svc.db_path.name if svc.db_path else 'None'}")
     print(f" Database Path:  {svc.db_path.resolve() if svc.db_path else 'None'}")
     print(f" Privacy Guarantee: Raw records NEVER leave localhost.")
-    if protocol == "https":
-        print(f" Note for Vercel/HTTPS: Open https://{host}:{port} in your browser")
-        print(" once and click 'Advanced -> Proceed to 127.0.0.1' to trust the cert.")
     print("=" * 60)
+
+    if open_browser:
+        import webbrowser
+        import threading
+        def _open():
+            time.sleep(0.5)
+            try:
+                webbrowser.open(f"{protocol}://{host}:{port}")
+            except Exception:
+                pass
+        threading.Thread(target=_open, daemon=True).start()
 
     try:
         httpd.serve_forever()

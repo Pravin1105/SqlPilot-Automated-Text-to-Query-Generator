@@ -17,6 +17,7 @@ if __name__ == "__main__":
     parser.add_argument("--ssl", action="store_true", help="Enable HTTPS with self-signed SSL for Vercel compatibility")
     parser.add_argument("--cert", default=None, help="Path to SSL certificate file")
     parser.add_argument("--key", default=None, help="Path to SSL private key file")
+    parser.add_argument("--no-browser", action="store_true", help="Do not open browser automatically")
     args = parser.parse_args()
     run_agent_server(
         host=args.host,
@@ -24,5 +25,5 @@ if __name__ == "__main__":
         db_path=args.db_path,
         use_ssl=args.ssl,
         cert_file=args.cert,
-        key_file=args.key,
+        open_browser=not args.no_browser,
     )
