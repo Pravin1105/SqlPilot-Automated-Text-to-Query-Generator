@@ -196,10 +196,24 @@
   let sessionToken = localStorage.getItem("sqlpilot_session_token") || "";
   let currentUser = null;
   let loadedTables = [];
-  const DEFAULT_AGENT_URL = window.location.protocol === "https:" ? "https://127.0.0.1:8765" : "http://127.0.0.1:8765";
-  let localAgentUrl = localStorage.getItem("sqlpilot_local_agent_url") || DEFAULT_AGENT_URL;
-  if (window.location.protocol === "https:" && localAgentUrl === "http://127.0.0.1:8765") {
-    localAgentUrl = "https://127.0.0.1:8765";
+  const isDirectConsole = window.location.port === "8765";
+  const isLocalHost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+  const DEFAULT_AGENT_URL = (isDirectConsole || isLocalHost)
+    ? `${window.location.protocol}//${window.location.host}`
+    : (window.location.protocol === "https:" ? "https://127.0.0.1:8765" : "http://localhost:8765");
+
+  let localAgentUrl = (isDirectConsole || (isLocalHost && window.location.port === "8765"))
+    ? window.location.origin
+    : (localStorage.getItem("sqlpilot_local_agent_url") || DEFAULT_AGENT_URL);
+
+  // If running over plain HTTP, purge any stale HTTPS local agent URLs
+  if (window.location.protocol === "http:" && (localAgentUrl.startsWith("https://127.0.0.1") || localAgentUrl.startsWith("https://localhost"))) {
+    localAgentUrl = localAgentUrl.replace(/^https:/, "http:");
+    localStorage.setItem("sqlpilot_local_agent_url", localAgentUrl);
+  }
+  if (isDirectConsole) {
+    localAgentUrl = window.location.origin;
+    localStorage.setItem("sqlpilot_local_agent_url", localAgentUrl);
   }
   let localSchema = null;
   let isLocalAgentConnected = false;
@@ -289,7 +303,33 @@
           return;
         }
       } catch (e) {
-        // Fall through to show login modal
+        // Fall through to auto-login or login modal
+      }
+    }
+
+    // Auto-login for local all-in-one console (port 8765 or localhost)
+    if (isDirectConsole || isLocalHost) {
+      try {
+        const autoResp = await fetch("/api/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: jsonSafe({ username: "local_user", password: "local_password" })
+        });
+        if (autoResp.ok) {
+          const autoData = await autoResp.json();
+          if (autoData.success) {
+            sessionToken = autoData.token;
+            currentUser = autoData.user;
+            localStorage.setItem("sqlpilot_session_token", sessionToken);
+            updateUserBadge(currentUser);
+            hideAuthModal();
+            await checkLocalAgent();
+            setSystemState("Ready");
+            return;
+          }
+        }
+      } catch (e) {
+        // Fall back to showing login modal if auto-login fails
       }
     }
 

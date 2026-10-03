@@ -8,6 +8,7 @@ and returns query results directly to the browser.
 import argparse
 import json
 import sys
+import time
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Optional
@@ -56,16 +57,52 @@ class LocalAgentHTTPRequestHandler(SimpleHTTPRequestHandler):
         except json.JSONDecodeError:
             return {}
 
+    def parse_request(self):
+        """Intercept non-HTTP binary requests (e.g. HTTPS ClientHello) before BaseHTTPRequestHandler corrupts terminal."""
+        if not hasattr(self, "raw_requestline") or not self.raw_requestline:
+            return False
+        first_byte = self.raw_requestline[:1]
+        # Valid HTTP request lines must start with an ASCII character (e.g. GET, POST, OPTIONS, HEAD)
+        if not first_byte.isalpha():
+            self.close_connection = True
+            is_tls = first_byte in (b"\x16", b"\x80", b"\x08") or any(b in self.raw_requestline[:10] for b in (b"\x16", b"\x03"))
+            if is_tls:
+                sys.stderr.write(
+                    f"{self.address_string()} - - [{self.log_date_time_string()}] "
+                    "[Notice] Intercepted HTTPS/TLS request on plain HTTP port. "
+                    "(Tip: please close old https:// tabs and use http://localhost:8765)\n"
+                )
+            try:
+                self.send_response(400, "Bad Request")
+                self.send_header("Content-Type", "text/plain")
+                self.send_header("Connection", "close")
+                self.end_headers()
+                self.wfile.write(b"Error: SQLPilot agent is running plain HTTP. Please use http://localhost:8765\n")
+            except Exception:
+                pass
+            return False
+        return super().parse_request()
+
+    def log_message(self, format, *args):
+        """Format log messages safely, suppressing binary noise and terminal corruption."""
+        try:
+            msg = format % args if args else format
+        except Exception:
+            msg = str(format)
+
+        # Detect control characters or non-ASCII bytes that corrupt the terminal
+        if any(ord(c) < 32 and c not in "\t\n\r" or ord(c) > 126 for c in msg):
+            return
+
+        sys.stderr.write(f"{self.address_string()} - - [{self.log_date_time_string()}] {msg}\n")
+
     def log_error(self, format, *args):
-        """Format errors with helpful troubleshooting hints for TLS/HTTPS mismatches."""
-        if args and any("\x16" in str(a) or "\\x16" in str(a) for a in args):
-            print("\n" + "=" * 60)
-            print(" [SQLPilot Notice] Received HTTPS/TLS connection on plain HTTP port.")
-            print(" -> Your browser is connecting from an HTTPS site (Vercel).")
-            print(" -> Please restart your agent with SSL enabled:")
-            print("    ./run_agent.sh --ssl --db <path-to-db>")
-            print("    (or python -m sqlpilot.agent --ssl --db <path-to-db>)")
-            print("=" * 60 + "\n")
+        """Safely log error messages without dumping binary strings."""
+        try:
+            msg = format % args if args else format
+        except Exception:
+            msg = str(format)
+        if any(ord(c) < 32 and c not in "\t\n\r" or ord(c) > 126 for c in msg):
             return
         super().log_error(format, *args)
 
@@ -289,6 +326,7 @@ def run_agent_server(
     service: Optional[LocalAgentService] = None,
     use_ssl: bool = False,
     cert_file: Optional[str] = None,
+    key_file: Optional[str] = None,
     open_browser: bool = True,
 ):
     """Run the Local SQLPilot Agent HTTP(S) server."""
@@ -308,21 +346,26 @@ def run_agent_server(
         httpd.socket = ctx.wrap_socket(httpd.socket, server_side=True)
         protocol = "https"
 
+    console_url = f"{protocol}://localhost:{port}"
+    alt_url = f"{protocol}://{host}:{port}"
+
     print("=" * 60)
-    print(" SQLPilot Web & Local Agent Active!")
-    print(f" Web Console:    {protocol}://{host}:{port}")
+    print(" SQLPilot All-in-One Console & Local Database Agent")
+    print(f" Web Console:    {console_url}")
+    if host != "localhost":
+        print(f" Direct IP:      {alt_url}")
     print(f" Local Database: {svc.db_path.name if svc.db_path else 'None'}")
     print(f" Database Path:  {svc.db_path.resolve() if svc.db_path else 'None'}")
-    print(f" Privacy Guarantee: Raw records NEVER leave localhost.")
+    print(" Privacy Guarantee: Raw records NEVER leave localhost.")
     print("=" * 60)
 
     if open_browser:
         import webbrowser
         import threading
         def _open():
-            time.sleep(0.5)
+            time.sleep(0.6)
             try:
-                webbrowser.open(f"{protocol}://{host}:{port}")
+                webbrowser.open(console_url)
             except Exception:
                 pass
         threading.Thread(target=_open, daemon=True).start()
