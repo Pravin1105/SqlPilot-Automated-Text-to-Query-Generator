@@ -18,6 +18,7 @@ if __name__ == "__main__":
     parser.add_argument("--cert", default=None, help="Path to SSL certificate file")
     parser.add_argument("--key", default=None, help="Path to SSL private key file")
     parser.add_argument("--no-browser", action="store_true", help="Do not open browser automatically")
+    args = parser.parse_args()
     resolved_db = str(Path(args.db_path).expanduser().resolve()) if args.db_path else None
     run_agent_server(
         host=args.host,
