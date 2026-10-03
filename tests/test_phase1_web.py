@@ -71,10 +71,10 @@ class TestPhase1WebFrontend(unittest.TestCase):
     def test_color_palette_adherence(self):
         """Verify the exact required 4-color palette is implemented in styles.css."""
         required_colors = {
-            "#092328": "Primary dark background",
-            "#12544F": "Secondary surface / panel",
-            "#2A835F": "Accent / active state",
-            "#8BBB92": "Light text / secondary highlight",
+            "#8B9A6E": "Accent / active state",
+            "#F7F2EB": "Primary background",
+            "#EAE2D6": "Secondary surface / panel",
+            "#EEEEEE": "Light neutral surface",
         }
         for hex_color, description in required_colors.items():
             self.assertIn(
@@ -95,7 +95,6 @@ class TestPhase1WebFrontend(unittest.TestCase):
             'id="schemaTree"',
             'id="tableCountBadge"',
             'id="schemaSearchInput"',
-            'id="recentList"',
             # Query Console
             'id="queryInput"',
             'id="btnRunQuery"',
@@ -176,7 +175,7 @@ class TestPhase1WebFrontend(unittest.TestCase):
         resp_css = self._simulate_get("/styles.css")
         self.assertIn("HTTP/1.0 200 OK", resp_css)
         self.assertIn("content-type: text/css", resp_css.lower())
-        self.assertIn("#092328", resp_css)
+        self.assertIn("#8b9a6e", resp_css.lower())
 
         # 3. GET /app.js
         resp_js = self._simulate_get("/app.js")

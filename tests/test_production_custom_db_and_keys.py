@@ -20,6 +20,7 @@ from typing import Any, Dict, Optional
 from unittest.mock import MagicMock, patch
 
 from config import settings
+from sqlpilot.agent.service import LocalAgentService
 from sqlpilot.core.llm_provider import LLMProvider
 from sqlpilot.core.schema_embedder import LocalSchemaVectorIndex, SchemaChunker
 from sqlpilot.core.schema_inspector import SchemaInspector
@@ -143,101 +144,64 @@ class TestProductionCustomDBAndKeys(unittest.TestCase):
         self.token = login_res["token"]
 
     # =========================================================================
-    # 1. Custom Database Upload & Validation
+    # 1. Hardened Hybrid Architecture: Cloud Uploads & Execution Prohibited
     # =========================================================================
 
-    def test_upload_rejects_non_sqlite_file(self):
-        """Invalid files missing SQLite 3 binary header are rejected with 400 error."""
-        bogus_bytes = b"This is a plain text file, not an SQLite database!"
-        res = self.service.upload_database("malicious.txt", bogus_bytes, token=self.token)
+    def test_upload_database_permanently_disabled(self):
+        """Database file uploads to cloud are strictly rejected with 410 Gone."""
+        bogus_bytes = b"This is a test database binary"
+        res = self.service.upload_database("malicious.db", bogus_bytes, token=self.token)
         self.assertFalse(res.get("success"))
-        self.assertIn("Invalid file format", res.get("error", ""))
+        self.assertEqual(res.get("status_code"), 410)
+        self.assertIn("permanently disabled", res.get("error", ""))
 
-    def test_upload_valid_sqlite_isolates_and_auto_connects(self):
-        """Valid SQLite file is stored in user tenant directory with 0600 permissions and auto-switched."""
-        with open(self.custom_sqlite_path, "rb") as f:
-            valid_bytes = f.read()
+    def test_cloud_execution_is_permanently_forbidden(self):
+        """Cloud execution of queries against SQLite is strictly rejected with 403 Forbidden."""
+        res = self.service.generate_and_route(
+            question="Show patients",
+            token=self.token,
+            execute_cloud=True,
+        )
+        self.assertFalse(res.get("success"))
+        self.assertEqual(res.get("status_code"), 403)
+        self.assertIn("permanently disabled by policy", res.get("error", ""))
 
-        filename = "my_custom_records.sqlite"
-        res = self.service.upload_database(filename, valid_bytes, token=self.token)
+    def test_schema_sync_indexes_metadata_only_zero_rows(self):
+        """Local agent extracts schema metadata and syncs to cloud (tables, columns, types, PKs, FKs)."""
+        agent = LocalAgentService(db_path=self.custom_sqlite_path)
+        schema_metadata = agent.get_schema()
+        self.assertTrue(schema_metadata.get("success"))
 
-        self.assertTrue(res.get("success"), res.get("error"))
-        self.assertEqual(res.get("database"), "my_custom_records.sqlite")
+        sync_res = self.service.sync_schema(schema_metadata, token=self.token)
+        self.assertTrue(sync_res.get("success"))
+        self.assertGreater(sync_res.get("tables_count", 0), 0)
 
-        # Verify saved in user tenant dir
-        expected_path = self.user_db_root / "analyst" / "my_custom_records.sqlite"
-        self.assertTrue(expected_path.exists())
-        self.assertEqual(expected_path.stat().st_size, len(valid_bytes))
-
-        # Check POSIX 0600 permissions (read/write only by owner)
-        file_mode = oct(expected_path.stat().st_mode & 0o777)
-        self.assertEqual(file_mode, "0o600")
-
-        # Verify connection manager is connected to this uploaded database
-        self.assertTrue(self.service.conn_manager.is_connected)
-        self.assertEqual(self.service.conn_manager.db_path.resolve(), expected_path.resolve())
-
-        # Verify schema inspection reflects the custom database
-        schema = self.service.get_schema(token=self.token)
-        table_names = [t["name"] for t in schema.get("tables", [])]
+        cloud_schema = self.service.get_schema(token=self.token)
+        self.assertTrue(cloud_schema.get("connected"))
+        table_names = [t["name"] for t in cloud_schema.get("tables", [])]
         self.assertIn("patients", table_names)
         self.assertIn("consultations", table_names)
 
-    def test_upload_gzip_compressed_sqlite_database(self):
-        """Compressed SQLite databases (e.g. for bypassing Vercel 4.5MB payload limit) are automatically decompressed."""
-        import gzip
-        with open(self.custom_sqlite_path, "rb") as f:
-            valid_bytes = f.read()
+    def test_list_databases_reports_synced_schemas_only(self):
+        """list_databases reports synced schemas rather than scanning server filesystem for .db files."""
+        agent = LocalAgentService(db_path=self.custom_sqlite_path)
+        self.service.sync_schema(agent.get_schema(), token=self.token)
 
-        compressed_bytes = gzip.compress(valid_bytes)
-        res = self.service.upload_database("compressed_hospital.sqlite", compressed_bytes, token=self.token)
-
-        self.assertTrue(res.get("success"), res.get("error"))
-        self.assertEqual(res.get("database"), "compressed_hospital.sqlite")
-
-        # Verify saved in uncompressed format
-        expected_path = self.user_db_root / "analyst" / "compressed_hospital.sqlite"
-        self.assertTrue(expected_path.exists())
-        self.assertEqual(expected_path.stat().st_size, len(valid_bytes))
-
-    def test_upload_filename_traversal_sanitization(self):
-        """Path traversal characters like ../ are sanitized to prevent directory traversal."""
-        with open(self.custom_sqlite_path, "rb") as f:
-            valid_bytes = f.read()
-
-        malicious_filename = "../../../etc/passwd.db"
-        res = self.service.upload_database(malicious_filename, valid_bytes, token=self.token)
-        self.assertTrue(res.get("success"))
-
-        # The filename must have stayed within user tenant folder
-        user_folder = self.user_db_root / "analyst"
-        for p in user_folder.glob("*.db"):
-            self.assertTrue(str(p).startswith(str(user_folder)))
-            self.assertNotIn("passwd", str(p.parent))
-
-    def test_list_databases_includes_user_uploaded_dbs(self):
-        """list_databases distinguishes user-uploaded databases with is_user_uploaded=True."""
-        with open(self.custom_sqlite_path, "rb") as f:
-            valid_bytes = f.read()
-
-        self.service.upload_database("research_study.db", valid_bytes, token=self.token)
         res = self.service.list_databases(token=self.token)
         self.assertTrue(res.get("success"))
-
-        user_dbs = [d for d in res.get("databases", []) if d.get("is_user_uploaded")]
-        self.assertTrue(any(d["name"] == "research_study.db" for d in user_dbs))
+        synced_dbs = [d for d in res.get("databases", []) if d.get("is_synced_metadata")]
+        self.assertTrue(len(synced_dbs) >= 1)
 
     # =========================================================================
     # 2. Strict Offline Zero-Record Privacy Invariant
     # =========================================================================
 
-    def test_zero_record_privacy_invariant_on_uploaded_custom_db(self):
+    def test_zero_record_privacy_invariant_on_custom_schema(self):
         """Ensures that NEVER under any circumstance do patient SSNs, confidential notes,
         or patient names reach schema chunks, vector embeddings, or LLM generation prompts."""
-        with open(self.custom_sqlite_path, "rb") as f:
-            valid_bytes = f.read()
-
-        self.service.upload_database("hospital_records.db", valid_bytes, token=self.token)
+        agent = LocalAgentService(db_path=self.custom_sqlite_path)
+        schema_metadata = agent.get_schema()
+        self.service.sync_schema(schema_metadata, token=self.token)
 
         # Sensitive records present in table
         confidential_records = [
@@ -250,8 +214,8 @@ class TestProductionCustomDBAndKeys(unittest.TestCase):
             "450.00",
         ]
 
-        # 1. Inspect schema
-        inspector = SchemaInspector(self.service.conn_manager.db_path)
+        # 1. Inspect schema locally
+        inspector = SchemaInspector(self.custom_sqlite_path)
         schema = inspector.inspect()
 
         # 2. Verify Schema Chunks: ONLY table/column names, zero record strings
@@ -525,14 +489,13 @@ class TestProductionCustomDBAndKeys(unittest.TestCase):
         self.assertEqual(cfg["model"], "openai/gpt-oss-120b")
 
     # =========================================================================
-    # 4. Safe Read Auto-Execution vs. Modifying Query Approval Gate
+    # 4. Safe Read Execution on Local Agent vs. Modifying Query Approval Gate
     # =========================================================================
 
-    def test_read_only_query_auto_executes_on_custom_database(self):
-        """Safe SELECT statements execute automatically on user-uploaded databases."""
-        with open(self.custom_sqlite_path, "rb") as f:
-            valid_bytes = f.read()
-        self.service.upload_database("auto_read.db", valid_bytes, token=self.token)
+    def test_read_only_query_generates_on_cloud_and_executes_on_local_agent(self):
+        """Safe SELECT statements generate SQL on cloud (executed=False) and execute on local agent."""
+        agent = LocalAgentService(db_path=self.custom_sqlite_path)
+        self.service.sync_schema(agent.get_schema(), token=self.token)
 
         self.mock_llm.response_sql = "SELECT patient_id, full_name, condition FROM patients;"
 
@@ -543,15 +506,20 @@ class TestProductionCustomDBAndKeys(unittest.TestCase):
 
         self.assertTrue(res.get("success"), res.get("error"))
         self.assertFalse(res.get("requires_approval"))
-        self.assertTrue(res.get("executed"))
-        self.assertGreater(len(res.get("rows", [])), 0)
-        self.assertEqual(res.get("columns"), ["patient_id", "full_name", "condition"])
+        self.assertFalse(res.get("executed"))  # Cloud NEVER executes
+        self.assertEqual(res.get("mode"), "hybrid_cloud")
 
-    def test_modifying_query_halts_at_approval_gate_with_explanation(self):
-        """UPDATE/DELETE/INSERT on custom databases require approval and include impact assessment."""
-        with open(self.custom_sqlite_path, "rb") as f:
-            valid_bytes = f.read()
-        self.service.upload_database("safe_write.db", valid_bytes, token=self.token)
+        # Query executes authoritatively on Local Agent
+        local_exec = agent.execute_query(res["sql"])
+        self.assertTrue(local_exec.get("success"))
+        self.assertTrue(local_exec.get("executed"))
+        self.assertGreater(len(local_exec.get("rows", [])), 0)
+        self.assertEqual(local_exec.get("columns"), ["patient_id", "full_name", "condition"])
+
+    def test_modifying_query_halts_and_approves_on_local_agent(self):
+        """UPDATE/DELETE/INSERT triggers approval gate, cloud approval is rejected, local agent executes."""
+        agent = LocalAgentService(db_path=self.custom_sqlite_path)
+        self.service.sync_schema(agent.get_schema(), token=self.token)
 
         self.mock_llm.response_sql = "UPDATE patients SET medication = 'Metoprolol 25mg' WHERE patient_id = 101;"
 
@@ -562,36 +530,35 @@ class TestProductionCustomDBAndKeys(unittest.TestCase):
 
         self.assertTrue(res.get("success"), res.get("error"))
         self.assertTrue(res.get("requires_approval"))
-        self.assertIn("pending_token", res)
+        self.assertFalse(res.get("executed"))
         self.assertIn("impact", res)
         self.assertIn("affected_tables", res)
         self.assertIn("patients", res["affected_tables"])
 
-        # Execute approval
-        approve_res = self.service.approve_and_execute(
-            token=res["pending_token"],
+        # Cloud approve_and_execute is permanently disabled (returns 403)
+        cloud_approve = self.service.approve_and_execute(
+            token="dummy",
             submitted_sql=res["sql"],
             auth_token=self.token,
         )
-        self.assertTrue(approve_res.get("success"), approve_res.get("error"))
-        self.assertEqual(approve_res.get("affected_rows"), 1)
+        self.assertFalse(cloud_approve.get("success"))
+        self.assertEqual(cloud_approve.get("status_code"), 403)
+
+        # Local Agent approves and executes against local SQLite
+        local_approve = agent.approve_and_execute(res["sql"])
+        self.assertTrue(local_approve.get("success"))
+        self.assertEqual(local_approve.get("affected_rows"), 1)
 
     # =========================================================================
-    # 5. Database Deletion
+    # 5. Database Deletion Disabled
     # =========================================================================
 
-    def test_delete_user_database(self):
-        """User can delete their uploaded database; service falls back to default database."""
-        with open(self.custom_sqlite_path, "rb") as f:
-            valid_bytes = f.read()
-        self.service.upload_database("to_be_deleted.db", valid_bytes, token=self.token)
-
-        db_path = self.user_db_root / "analyst" / "to_be_deleted.db"
-        self.assertTrue(db_path.exists())
-
+    def test_delete_database_is_permanently_disabled(self):
+        """Cloud delete_database is permanently disabled with 410 Gone."""
         del_res = self.service.delete_database("to_be_deleted.db", token=self.token)
-        self.assertTrue(del_res.get("success"))
-        self.assertFalse(db_path.exists())
+        self.assertFalse(del_res.get("success"))
+        self.assertEqual(del_res.get("status_code"), 410)
+        self.assertIn("permanently disabled", del_res.get("error", ""))
 
 
 if __name__ == "__main__":
