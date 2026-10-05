@@ -101,9 +101,6 @@ class GroqLLMProvider(LLMProvider):
                 return self.generate_json(prompt, system_instruction)
 
             raise RuntimeError(f"Groq API Error ({e.code}): {msg}") from e
-        except urllib.error.URLError as e:
-            reason = getattr(e, "reason", str(e))
-            raise RuntimeError(f"Groq Network Error: Could not connect to API ({reason})") from e
         except Exception as e:
             raise RuntimeError(f"Groq Connection Error: {str(e)}") from e
 
@@ -217,9 +214,6 @@ class OpenAILLMProvider(LLMProvider):
             except Exception:
                 msg = err_body
             raise RuntimeError(f"OpenAI API Error ({e.code}): {msg}") from e
-        except urllib.error.URLError as e:
-            reason = getattr(e, "reason", str(e))
-            raise RuntimeError(f"OpenAI Network Error: Could not connect to API ({reason})") from e
         except Exception as e:
             raise RuntimeError(f"OpenAI Connection Error: {str(e)}") from e
 
@@ -288,9 +282,6 @@ class ClaudeLLMProvider(LLMProvider):
             except Exception:
                 msg = err_body
             raise RuntimeError(f"Anthropic Claude API Error ({e.code}): {msg}") from e
-        except urllib.error.URLError as e:
-            reason = getattr(e, "reason", str(e))
-            raise RuntimeError(f"Anthropic Claude Network Error: Could not connect to API ({reason})") from e
         except Exception as e:
             raise RuntimeError(f"Anthropic Claude Connection Error: {str(e)}") from e
 

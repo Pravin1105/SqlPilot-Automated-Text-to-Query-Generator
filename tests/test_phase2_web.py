@@ -6,7 +6,6 @@ import unittest
 from pathlib import Path
 
 from config import settings
-from sqlpilot.agent.service import LocalAgentService
 from sqlpilot.core.llm_provider import LLMProvider
 from sqlpilot.core.safety_engine import SafetyLevel
 from sqlpilot.db.sample_db_builder import seed_sample_database
@@ -95,7 +94,7 @@ class TestPhase2WebBackend(unittest.TestCase):
         self.assertIn("customers", cust_fk["foreign_key"])
 
     def test_read_query_auto_executes(self):
-        """Safe read queries generate validated SQL on cloud (executed=False) and execute on local agent."""
+        """Safe read queries must auto-execute and return database rows."""
         self.mock_llm.response_map = {
             "top customers": {
                 "sql": "SELECT customer_id, first_name, last_name FROM customers ORDER BY customer_id ASC LIMIT 2;",
@@ -107,20 +106,13 @@ class TestPhase2WebBackend(unittest.TestCase):
         self.assertTrue(res["success"])
         self.assertEqual(res["safety_level"], "READ")
         self.assertFalse(res["requires_approval"])
-        self.assertFalse(res["executed"])  # Cloud NEVER executes
-        self.assertEqual(res["mode"], "hybrid_cloud")
-
-        # Local Agent executes authoritatively on local SQLite
-        agent = LocalAgentService(db_path=self.db_path)
-        exec_res = agent.execute_query(res["sql"])
-        self.assertTrue(exec_res["success"])
-        self.assertTrue(exec_res["executed"])
-        self.assertEqual(len(exec_res["rows"]), 2)
-        self.assertEqual(exec_res["columns"], ["customer_id", "first_name", "last_name"])
-        self.assertEqual(exec_res["rows"][0]["first_name"], "Alice")
+        self.assertTrue(res["executed"])
+        self.assertEqual(len(res["rows"]), 2)
+        self.assertEqual(res["columns"], ["customer_id", "first_name", "last_name"])
+        self.assertEqual(res["rows"][0]["first_name"], "Alice")
 
     def test_dml_halts_at_approval_gate(self):
-        """Modifying queries must NOT auto-execute and must require explicit approval on local agent."""
+        """Modifying queries must NOT auto-execute and must require explicit approval."""
         self.mock_llm.response_map = {
             "update stock": {
                 "sql": "UPDATE products SET stock_quantity = 35 WHERE product_id = 101;",
@@ -134,29 +126,25 @@ class TestPhase2WebBackend(unittest.TestCase):
         self.assertEqual(res["safety_level"], "DML")
         self.assertTrue(res["requires_approval"])
         self.assertFalse(res["executed"])
-        self.assertIn("impact", res)
+        self.assertIn("pending_token", res)
+        token = res["pending_token"]
 
         # Verify database was NOT modified
-        agent = LocalAgentService(db_path=self.db_path)
-        db_check = agent.execute_query("SELECT stock_quantity FROM products WHERE product_id = 101;")
-        self.assertNotEqual(db_check["rows"][0]["stock_quantity"], 35)
+        db_check = self.service.conn_manager.executor.execute("SELECT stock_quantity FROM products WHERE product_id = 101;")
+        self.assertNotEqual(db_check.rows[0]["stock_quantity"], 35)
 
-        # Modifying query blocked without explicit approval
-        blocked = agent.execute_query(res["sql"])
-        self.assertFalse(blocked["success"])
-        self.assertTrue(blocked["requires_approval"])
-
-        # 2. Explicit User Approval on Local Agent
-        approve_res = agent.approve_and_execute("UPDATE products SET stock_quantity = 35 WHERE product_id = 101;")
+        # 2. Explicit User Approval
+        approve_res = self.service.approve_and_execute(token, "UPDATE products SET stock_quantity = 35 WHERE product_id = 101;")
         self.assertTrue(approve_res["success"])
+        self.assertTrue(approve_res["executed"])
         self.assertEqual(approve_res["affected_rows"], 1)
 
         # Verify database WAS modified after approval
-        db_check_after = agent.execute_query("SELECT stock_quantity FROM products WHERE product_id = 101;")
-        self.assertEqual(db_check_after["rows"][0]["stock_quantity"], 35)
+        db_check_after = self.service.conn_manager.executor.execute("SELECT stock_quantity FROM products WHERE product_id = 101;")
+        self.assertEqual(db_check_after.rows[0]["stock_quantity"], 35)
 
     def test_approval_integrity_violation_blocked(self):
-        """Attempting to approve a different SQL than was presented must fail on local agent."""
+        """Attempting to approve a different SQL than was presented must fail."""
         self.mock_llm.response_map = {
             "modify price": {
                 "sql": "UPDATE products SET price = 999.0 WHERE product_id = 101;",
@@ -165,16 +153,14 @@ class TestPhase2WebBackend(unittest.TestCase):
         }
 
         res = self.service.generate_and_route("modify price")
-        self.assertTrue(res["requires_approval"])
+        token = res["pending_token"]
 
-        # Attacker tries to execute a dangerous tampered statement directly
-        agent = LocalAgentService(db_path=self.db_path)
+        # Attacker tries to approve a malicious statement
         tampered_sql = "DROP TABLE products;"
-        tampered_res = agent.execute_query(tampered_sql)
+        tampered_res = self.service.approve_and_execute(token, tampered_sql)
 
         self.assertFalse(tampered_res["success"])
-        self.assertTrue(tampered_res["requires_approval"])
-        self.assertEqual(tampered_res["safety_level"], "DESTRUCTIVE")
+        self.assertIn("Approval Integrity Violation", tampered_res["error"])
 
         # Verify products table is safe and was not dropped
         schema = self.service.get_schema()
@@ -197,8 +183,10 @@ class TestPhase2WebBackend(unittest.TestCase):
         self.assertTrue(res["requires_approval"])
         self.assertFalse(res["executed"])
 
+        token = res["pending_token"]
+
         # User cancels / rejects execution
-        reject_res = self.service.reject_query("dummy_token")
+        reject_res = self.service.reject_query(token)
         self.assertTrue(reject_res["success"])
 
         # Table payments must still exist
@@ -271,9 +259,8 @@ class TestPhase2WebBackend(unittest.TestCase):
         self.assertEqual(code, 200)
         self.assertTrue(data["success"])
         self.assertEqual(data["safety_level"], "READ")
-        self.assertFalse(data["executed"])  # Hybrid mode
-        self.assertEqual(data["mode"], "hybrid_cloud")
-        self.assertIn("SELECT", data["sql"])
+        self.assertTrue(data["executed"])
+        self.assertTrue(len(data["rows"]) > 0)
 
     def test_groq_llm_provider_setup_and_json_cleaning(self):
         """Verify GroqLLMProvider initialization and JSON cleaner helper."""

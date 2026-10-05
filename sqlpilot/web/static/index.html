@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SQLPilot — Database Workspace</title>
-  <link rel="stylesheet" href="styles.css?v=2.8">
+  <link rel="stylesheet" href="styles.css?v=2.4">
 </head>
 <body>
   <div class="app-layout">
@@ -48,7 +48,7 @@
             <polyline points="17 8 12 3 7 8"></polyline>
             <line x1="12" y1="3" x2="12" y2="15"></line>
           </svg>
-          <span>Local DB</span>
+          <span>Upload DB</span>
         </button>
 
         <!-- User LLM Settings Button -->
@@ -86,16 +86,16 @@
 
           <div class="workspace-card">
             <div class="workspace-card-row">
-              <span class="meta-label">Architecture</span>
-              <span class="meta-value">Hybrid Cloud</span>
+              <span class="meta-label">Storage</span>
+              <span class="meta-value">Local / Offline</span>
             </div>
             <div class="workspace-card-row">
-              <span class="meta-label">Local Agent</span>
-              <span class="meta-value" id="agentStateLabel" style="font-weight: 600;">127.0.0.1:8765</span>
+              <span class="meta-label">Dialect</span>
+              <span class="meta-value">SQLite 3</span>
             </div>
             <div class="workspace-card-row">
               <span class="meta-label">State</span>
-              <span class="status-text warning" id="connectionStateLabel">Connecting...</span>
+              <span class="status-text connected" id="connectionStateLabel">Connected</span>
             </div>
           </div>
         </div>
@@ -104,7 +104,7 @@
         <div class="sidebar-section schema-section">
           <div class="sidebar-header">
             <span class="sidebar-title">Schema Explorer</span>
-            <span class="table-count-badge" id="tableCountBadge">0 tables</span>
+            <span class="table-count-badge" id="tableCountBadge">5 tables</span>
           </div>
 
           <div class="schema-search-container">
@@ -116,7 +116,15 @@
           </div>
         </div>
 
-
+        <!-- Recent Queries -->
+        <div class="sidebar-section recent-section">
+          <div class="sidebar-header">
+            <span class="sidebar-title">Recent Queries</span>
+          </div>
+          <div class="recent-list" id="recentList">
+            <!-- Dynamically populated or default chips -->
+          </div>
+        </div>
       </aside>
 
       <!-- Main Query Console -->
@@ -363,63 +371,33 @@
     </div>
   </div>
 
-  <!-- Local Database / Agent Connection Modal -->
+  <!-- Upload Database Modal -->
   <div class="auth-modal-overlay hidden" id="uploadModal">
     <div class="auth-modal-card">
       <div class="modal-card-top">
-        <h2 class="auth-modal-title">Local Database Connection</h2>
+        <h2 class="auth-modal-title">Connect Custom Database</h2>
         <button type="button" class="btn-modal-close" id="btnCloseUploadModal" title="Close">✕</button>
       </div>
-      <p class="auth-modal-subtitle">Hybrid Architecture: Your SQLite database stays 100% on your machine. Zero records leave localhost.</p>
+      <p class="auth-modal-subtitle">Upload your SQLite database (.db, .sqlite). Stored in your private tenant workspace.</p>
 
       <form id="uploadForm" class="auth-form" onsubmit="return false;">
-        <div class="form-group">
-          <label for="inputLocalAgentUrl" class="form-label">Local Agent Endpoint</label>
-          <input type="text" id="inputLocalAgentUrl" class="form-input" placeholder="http://127.0.0.1:8765" value="http://127.0.0.1:8765">
+        <div class="file-dropzone" id="fileDropzone">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="17 8 12 3 7 8"></polyline>
+            <line x1="12" y1="3" x2="12" y2="15"></line>
+          </svg>
+          <p class="dropzone-text" id="dropzoneText">Click to select or drag SQLite file here</p>
+          <span class="dropzone-hint">.db, .sqlite, .sqlite3 (Max 50MB)</span>
+          <input type="file" id="dbFileInput" accept=".db,.sqlite,.sqlite3" style="display:none;">
         </div>
-
-        <div class="form-group">
-          <label class="form-label">Select SQLite Database File (.db, .sqlite, .sqlite3)</label>
-          <div id="fileDropzone" style="border: 2px dashed rgba(255, 255, 255, 0.2); border-radius: 6px; padding: 18px 12px; text-align: center; cursor: pointer; transition: all 0.2s ease; background: rgba(0, 0, 0, 0.15);">
-            <input type="file" id="dbFileInput" accept=".db,.sqlite,.sqlite3" style="display: none;">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin: 0 auto 6px; color: var(--accent-active); display: block;">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-              <polyline points="17 8 12 3 7 8"></polyline>
-              <line x1="12" y1="3" x2="12" y2="15"></line>
-            </svg>
-            <div id="dropzoneText" style="font-size: 13px; color: var(--text-white); font-weight: 500;">
-              Click to choose SQLite file or drag &amp; drop here
-            </div>
-            <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">
-              Direct to Local Agent (127.0.0.1) &mdash; never sent to Vercel
-            </div>
-          </div>
-        </div>
-
-        <div style="display: flex; align-items: center; margin: 10px 0; gap: 8px;">
-          <div style="flex: 1; height: 1px; background: rgba(255,255,255,0.1);"></div>
-          <span style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">or enter local path</span>
-          <div style="flex: 1; height: 1px; background: rgba(255,255,255,0.1);"></div>
-        </div>
-
-        <div class="form-group">
-          <label for="inputLocalDbPath" class="form-label">Local SQLite Database File Path</label>
-          <input type="text" id="inputLocalDbPath" class="form-input" placeholder="/path/to/my_store.db">
-        </div>
-
-        <div style="background: rgba(139, 154, 110, 0.15); border: 1px solid var(--accent-active); border-radius: 4px; padding: 10px; font-size: 11px; line-height: 1.5; color: var(--text-white);">
-          <strong style="color: var(--accent-active);">To run Local Agent on your machine:</strong><br>
-          <code style="display:block; margin-top:4px; font-family:var(--font-mono); color:var(--text-light); word-break:break-all;">./run_agent.sh --db /path/to/database.db</code>
-          <span style="font-size:10px; color:var(--text-muted); display:block; margin-top:4px;">(Connects securely to loopback http://127.0.0.1:8765. Zero records ever leave your machine.)</span>
-        </div>
-
 
         <div class="auth-error-box hidden" id="uploadErrorBox">
           <span class="auth-error-msg" id="uploadErrorMsg"></span>
         </div>
 
-        <button type="button" id="btnUploadSubmit" class="btn-auth-submit">
-          <span>Connect Local Database</span>
+        <button type="button" id="btnUploadSubmit" class="btn-auth-submit" disabled>
+          <span>Upload & Connect</span>
         </button>
       </form>
 
@@ -427,7 +405,7 @@
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
         </svg>
-        <span>Zero database records will ever leave your computer.</span>
+        <span>Zero tuples or records will ever be sent to LLMs or vector indices.</span>
       </div>
     </div>
   </div>
@@ -487,6 +465,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=2.8"></script>
+  <script src="app.js?v=2.6"></script>
 </body>
 </html>

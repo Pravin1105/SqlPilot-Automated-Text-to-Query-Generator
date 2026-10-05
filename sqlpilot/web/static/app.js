@@ -109,7 +109,7 @@
     btnCredAdmin: document.getElementById("btnCredAdmin"),
     btnCredAnalyst: document.getElementById("btnCredAnalyst"),
 
-    // Upload / Local DB Modal
+    // Upload Modal
     btnOpenUploadModal: document.getElementById("btnOpenUploadModal"),
     uploadModal: document.getElementById("uploadModal"),
     btnCloseUploadModal: document.getElementById("btnCloseUploadModal"),
@@ -120,10 +120,6 @@
     btnUploadSubmit: document.getElementById("btnUploadSubmit"),
     uploadErrorBox: document.getElementById("uploadErrorBox"),
     uploadErrorMsg: document.getElementById("uploadErrorMsg"),
-    inputLocalAgentUrl: document.getElementById("inputLocalAgentUrl"),
-    inputLocalDbPath: document.getElementById("inputLocalDbPath"),
-    agentStateLabel: document.getElementById("agentStateLabel"),
-    connectionStateLabel: document.getElementById("connectionStateLabel"),
 
     // Settings Modal
     btnOpenSettingsModal: document.getElementById("btnOpenSettingsModal"),
@@ -196,27 +192,7 @@
   let sessionToken = localStorage.getItem("sqlpilot_session_token") || "";
   let currentUser = null;
   let loadedTables = [];
-  const isDirectConsole = window.location.port === "8765";
-  const isLocalHost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
-  const DEFAULT_AGENT_URL = (isDirectConsole || isLocalHost)
-    ? `${window.location.protocol}//${window.location.host}`
-    : "http://127.0.0.1:8765";
-
-  let localAgentUrl = (isDirectConsole || (isLocalHost && window.location.port === "8765"))
-    ? window.location.origin
-    : (localStorage.getItem("sqlpilot_local_agent_url") || DEFAULT_AGENT_URL);
-
-  // Purge any stale HTTPS local agent URLs stored in localStorage
-  if (localAgentUrl.startsWith("https://127.0.0.1") || localAgentUrl.startsWith("https://localhost")) {
-    localAgentUrl = localAgentUrl.replace(/^https:/, "http:");
-    localStorage.setItem("sqlpilot_local_agent_url", localAgentUrl);
-  }
-  if (isDirectConsole) {
-    localAgentUrl = window.location.origin;
-    localStorage.setItem("sqlpilot_local_agent_url", localAgentUrl);
-  }
-  let localSchema = null;
-  let isLocalAgentConnected = false;
+  let pendingApprovalState = null;
   let recentQueries = [
     "Show top 5 customers by total spending this year.",
     "List all products in the Electronics category.",
@@ -291,45 +267,14 @@
           currentUser = data.user;
           updateUserBadge(currentUser);
           hideAuthModal();
-
-          // Probe Local Agent for Hybrid Architecture
-          await checkLocalAgent();
-          if (!isLocalAgentConnected) {
-            await loadDatabases();
-            await fetchBackendSchema();
-            await fetchBackendStatus();
-          }
+          await loadDatabases();
+          await fetchBackendSchema();
+          await fetchBackendStatus();
           setSystemState("Ready");
           return;
         }
       } catch (e) {
-        // Fall through to auto-login or login modal
-      }
-    }
-
-    // Auto-login for local all-in-one console (port 8765 or localhost)
-    if (isDirectConsole || isLocalHost) {
-      try {
-        const autoResp = await fetch("/api/auth/login", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: jsonSafe({ username: "local_user", password: "local_password" })
-        });
-        if (autoResp.ok) {
-          const autoData = await autoResp.json();
-          if (autoData.success) {
-            sessionToken = autoData.token;
-            currentUser = autoData.user;
-            localStorage.setItem("sqlpilot_session_token", sessionToken);
-            updateUserBadge(currentUser);
-            hideAuthModal();
-            await checkLocalAgent();
-            setSystemState("Ready");
-            return;
-          }
-        }
-      } catch (e) {
-        // Fall back to showing login modal if auto-login fails
+        // Fall through to show login modal
       }
     }
 
@@ -371,13 +316,9 @@
         updateUserBadge(currentUser);
         hideAuthModal();
 
-        // Immediately probe and sync Local Agent upon login
-        await checkLocalAgent();
-        if (!isLocalAgentConnected) {
-          await loadDatabases();
-          await fetchBackendSchema();
-          await fetchBackendStatus();
-        }
+        await loadDatabases();
+        await fetchBackendSchema();
+        await fetchBackendStatus();
         setSystemState("Ready");
       } else {
         elements.authErrorMsg.textContent = data.error || "Authentication failed.";
@@ -443,39 +384,6 @@
     setSystemState("Switching DB...");
 
     try {
-      if (isLocalAgentConnected) {
-        // Architecture invariant: Local Agent owns database connection & schema extraction
-        const cleanUrl = getValidAgentUrl(localAgentUrl);
-        const connResp = await fetch(`${cleanUrl}/agent/connect`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: jsonSafe({ db_path: targetDb })
-        });
-        const connData = await connResp.json();
-        if (connResp.ok && connData.success && connData.schema) {
-          localSchema = connData.schema;
-          loadedTables = connData.schema.tables || [];
-          renderSchemaTree(loadedTables);
-
-          // Synchronize schema metadata to Vercel for Schema RAG & LLM prompt
-          try {
-            await fetchWithAuth("/api/schema/sync", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: jsonSafe({ schema: connData.schema })
-            });
-          } catch (syncErr) {
-            console.warn("[LocalAgent] Schema sync skipped:", syncErr);
-          }
-
-          resetSession();
-          setSystemState("Ready");
-          showToast(`Switched to local database: ${connData.database || targetDb}`, "success");
-          return;
-        }
-      }
-
-      // If switching among already synced schemas on Vercel
       const resp = await fetchWithAuth("/api/database/switch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -537,138 +445,6 @@
 
     loadedTables = FALLBACK_SCHEMA.tables;
     renderSchemaTree(loadedTables);
-  }
-
-  function getValidAgentUrl(url) {
-    if (!url || typeof url !== "string") return "http://127.0.0.1:8765";
-    const trimmed = url.trim().replace(/\/+$/, "");
-    if (!trimmed || !trimmed.startsWith("http")) return "http://127.0.0.1:8765";
-    return trimmed;
-  }
-
-  function markLocalAgentOffline() {
-    isLocalAgentConnected = false;
-    if (elements.agentStateLabel) {
-      elements.agentStateLabel.textContent = "Offline (127.0.0.1:8765)";
-      elements.agentStateLabel.style.color = "var(--accent-danger)";
-    }
-    if (elements.connectionStateLabel) {
-      elements.connectionStateLabel.textContent = "Offline";
-      elements.connectionStateLabel.className = "status-text disconnected";
-    }
-  }
-
-  // --- Local Agent Interaction (Hybrid Cloud/Local Architecture) ---
-  async function checkLocalAgent() {
-    let cleanUrl = getValidAgentUrl(localAgentUrl);
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 2000);
-      let resp;
-      try {
-        resp = await fetch(`${cleanUrl}/agent/status`, {
-          signal: controller.signal,
-          headers: { "Content-Type": "application/json" }
-        });
-      } catch (directErr) {
-        if (cleanUrl.includes("127.0.0.1")) {
-          try {
-            const altUrl = cleanUrl.replace("127.0.0.1", "localhost");
-            const altResp = await fetch(`${altUrl}/agent/status`, {
-              signal: controller.signal,
-              headers: { "Content-Type": "application/json" }
-            });
-            if (altResp && altResp.ok) {
-              resp = altResp;
-              cleanUrl = altUrl;
-              localAgentUrl = altUrl;
-              localStorage.setItem("sqlpilot_local_agent_url", localAgentUrl);
-            }
-          } catch (altErr) {
-            // failed
-          }
-        }
-        if (!resp) {
-          clearTimeout(timeoutId);
-          markLocalAgentOffline();
-          return false;
-        }
-      }
-      clearTimeout(timeoutId);
-
-      if (resp && resp.ok) {
-        const data = await resp.json();
-        isLocalAgentConnected = !!data.connected;
-
-        if (elements.agentStateLabel) {
-          elements.agentStateLabel.textContent = data.connected
-            ? `${data.database || "Connected"}`
-            : "Agent Ready (No DB)";
-          elements.agentStateLabel.style.color = data.connected ? "var(--accent-active)" : "var(--accent-warn)";
-        }
-        if (elements.connectionStateLabel) {
-          elements.connectionStateLabel.textContent = data.connected ? "Connected" : "No DB";
-          elements.connectionStateLabel.className = data.connected ? "status-text connected" : "status-text warning";
-        }
-
-        if (data.connected) {
-          // Fetch schema metadata directly from local agent (Zero rows/records)
-          let sResp;
-          try {
-            sResp = await fetch(`${cleanUrl}/agent/schema`);
-          } catch (e) {
-            sResp = null;
-          }
-
-          if (sResp && sResp.ok) {
-            const sData = await sResp.json();
-            if (sData.tables && sData.tables.length > 0) {
-              localSchema = sData;
-              loadedTables = sData.tables;
-              renderSchemaTree(loadedTables);
-
-              // Sync schema metadata to Vercel in background for Schema RAG & LLM prompt
-              try {
-                await fetchWithAuth("/api/schema/sync", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: jsonSafe({ schema: sData })
-                });
-              } catch (syncErr) {
-                // Background sync failure won't block UI
-              }
-
-              // Update DB dropdown to show local database
-              if (elements.dbSelect) {
-                elements.dbSelect.innerHTML = "";
-                const opt = document.createElement("option");
-                opt.value = data.database;
-                opt.textContent = `💻 Local: ${data.database}`;
-                opt.selected = true;
-                elements.dbSelect.appendChild(opt);
-              }
-
-              setSystemState("Local Agent Connected");
-              return true;
-            }
-          }
-        }
-        return true;
-      }
-    } catch (e) {
-      // Local agent not reachable
-    }
-
-    isLocalAgentConnected = false;
-    if (elements.agentStateLabel) {
-      elements.agentStateLabel.textContent = "Offline (127.0.0.1:8765)";
-      elements.agentStateLabel.style.color = "var(--text-muted)";
-    }
-    if (elements.connectionStateLabel) {
-      elements.connectionStateLabel.textContent = "Disconnected";
-      elements.connectionStateLabel.className = "status-text error";
-    }
-    return false;
   }
 
   function jsonSafe(obj) {
@@ -887,41 +663,15 @@
       renderRecentQueries();
     }
 
-    // Step 2: Ensure Local Agent & Schema are ready
+    // Step 2 & 3: Generation & Validation
     setTimeout(() => updateStepper("gen"), 150);
-    showLoading("Verifying local database connection...");
-
-    if (!isLocalAgentConnected || !localSchema) {
-      await checkLocalAgent();
-    }
-
-    if (!isLocalAgentConnected || !localSchema) {
-      hideLoading();
-      setSystemState("Local Agent Required");
-      updateStepper("input");
-      showError(
-        "Local Agent Not Connected",
-        "SQLPilot requires the local agent to run queries against your local SQLite database without exposing data to the cloud.<br><br>" +
-        "Please ensure your local agent is running in your terminal:<br>" +
-        "<pre style='background:#0f172a; color:#38bdf8; padding:8px 12px; border-radius:6px; margin:8px 0; font-family:monospace;'>python -m sqlpilot.agent --db ./data/sample_store.db</pre>" +
-        "Then click 'Run Query' again."
-      );
-      return;
-    }
-
     showLoading("Chunking schema metadata & generating SQL with offline privacy guard...");
 
     try {
-      const payload = {
-        question,
-        schema: localSchema,
-        execute_cloud: false
-      };
-
       const resp = await fetchWithAuth("/api/query/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: jsonSafe(payload)
+        body: jsonSafe({ question })
       });
 
       const data = await resp.json();
@@ -964,35 +714,14 @@
           sql: data.sql,
           explanation: data.explanation,
           safety_level: data.safety_level,
-          affected_tables: data.affected_tables || [],
-          is_local: true
+          affected_tables: data.affected_tables || []
         };
         showApprovalGate(data);
       } else {
-        // Safe READ query: Execute DIRECTLY on Local SQLite Agent (Zero records to Vercel)
-        showLoading("Executing query locally via SQLite (zero data leaves localhost)...");
-        try {
-          const cleanUrl = getValidAgentUrl(localAgentUrl);
-          const execResp = await fetch(`${cleanUrl}/agent/execute`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: jsonSafe({ sql: data.sql })
-          });
-          const execData = await execResp.json();
-          if (!execResp.ok || !execData.success) {
-            hideLoading();
-            setSystemState("Execution Failed");
-            showError("Local Execution Error", execData.error || "Local SQLite execution failed.");
-            return;
-          }
-          updateStepper("exec");
-          setSystemState("Complete (Local SQLite)");
-          renderResultsTable(execData.columns || [], execData.rows || [], execData.execution_time_ms || 0);
-        } catch (execErr) {
-          hideLoading();
-          setSystemState("Execution Failed");
-          showError("Local Agent Connection Error", `Failed to execute on local agent: ${execErr.message}`);
-        }
+        // Safe READ query: auto-executed by backend
+        updateStepper("exec");
+        setSystemState("Complete");
+        renderResultsTable(data.columns || [], data.rows || [], data.execution_time_ms || 0);
       }
     } catch (err) {
       hideLoading();
@@ -1046,31 +775,30 @@
 
     const token = pendingApprovalState.token;
     const sql = elements.generatedSqlText.textContent.trim();
-    const isLocal = pendingApprovalState.is_local;
 
     hideApprovalGate();
     showLoading("Executing approved modification against local database...");
     setSystemState("Executing Modification...");
 
     try {
-      const cleanUrl = getValidAgentUrl(localAgentUrl);
-      const resp = await fetch(`${cleanUrl}/agent/approve`, {
+      const resp = await fetchWithAuth("/api/query/approve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: jsonSafe({ sql, token })
+        body: jsonSafe({ token, sql })
       });
+
       const data = await resp.json();
 
-      if (!data || !data.success) {
+      if (!resp.ok || !data.success) {
         hideLoading();
         setSystemState("Execution Failed");
-        showError("Execution Error", (data && data.error) || "Database execution failed.");
+        showError("Execution Error", data.error || "Database execution failed.");
         return;
       }
 
       // Success
       updateStepper("exec");
-      setSystemState("Complete (Local SQLite)");
+      setSystemState("Complete");
       pendingApprovalState = null;
 
       if (data.rows && data.rows.length > 0) {
@@ -1082,11 +810,7 @@
       }
 
       // Refresh schema in case of DDL modifications
-      if (isLocal) {
-        await checkLocalAgent();
-      } else {
-        fetchBackendSchema();
-      }
+      fetchBackendSchema();
     } catch (err) {
       hideLoading();
       setSystemState("Error");
@@ -1177,11 +901,7 @@
     elements.emptyState.classList.add("hidden");
     elements.errorState.classList.remove("hidden");
     elements.errorTitle.textContent = title;
-    if (typeof message === "string" && !message.includes("<p") && !message.includes("<ul") && !message.includes("<div")) {
-      elements.errorMessage.textContent = message;
-    } else {
-      elements.errorMessage.innerHTML = message;
-    }
+    elements.errorMessage.innerHTML = message;
   }
 
   function resetSession() {
@@ -1204,7 +924,6 @@
   }
 
   function renderRecentQueries() {
-    if (!elements.recentList) return;
     elements.recentList.innerHTML = "";
     recentQueries.forEach(query => {
       const item = document.createElement("button");
@@ -1316,21 +1035,14 @@
     setTimeout(() => closeSettingsModal(), 1200);
   }
 
-  // --- Local Agent Connection Handlers ---
+  // --- Database Upload Handlers ---
   function openUploadModal() {
-    if (elements.inputLocalAgentUrl) {
-      elements.inputLocalAgentUrl.value = localAgentUrl;
-    }
     selectedUploadFile = null;
-    if (elements.dbFileInput) {
-      elements.dbFileInput.value = "";
-    }
     if (elements.dropzoneText) {
-      elements.dropzoneText.textContent = "Click to choose SQLite file or drag & drop here";
+      elements.dropzoneText.textContent = "Click to select or drag SQLite file here";
     }
     if (elements.btnUploadSubmit) {
-      elements.btnUploadSubmit.disabled = false;
-      elements.btnUploadSubmit.textContent = "Connect Local Database";
+      elements.btnUploadSubmit.disabled = true;
     }
     if (elements.uploadErrorBox) {
       elements.uploadErrorBox.classList.add("hidden");
@@ -1346,77 +1058,117 @@
     }
   }
 
-  async function handleConnectLocal() {
-    const agentUrlInput = elements.inputLocalAgentUrl ? elements.inputLocalAgentUrl.value.trim() : "";
-    const dbPathInput = elements.inputLocalDbPath ? elements.inputLocalDbPath.value.trim() : "";
+  function handleFileSelected(file) {
+    if (!file) return;
+    if (!file.name.endsWith(".db") && !file.name.endsWith(".sqlite") && !file.name.endsWith(".sqlite3")) {
+      if (elements.uploadErrorMsg) {
+        elements.uploadErrorMsg.textContent = "Please select a valid SQLite database file (.db, .sqlite).";
+        elements.uploadErrorBox.classList.remove("hidden");
+      }
+      if (elements.btnUploadSubmit) elements.btnUploadSubmit.disabled = true;
+      return;
+    }
+    selectedUploadFile = file;
+    if (elements.dropzoneText) {
+      elements.dropzoneText.textContent = `Selected: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+    }
+    if (elements.uploadErrorBox) {
+      elements.uploadErrorBox.classList.add("hidden");
+    }
+    if (elements.btnUploadSubmit) {
+      elements.btnUploadSubmit.disabled = false;
+    }
+  }
 
-    const agentUrl = (agentUrlInput || "http://127.0.0.1:8765").replace(/\/+$/, "");
-    localAgentUrl = agentUrl;
-    localStorage.setItem("sqlpilot_local_agent_url", localAgentUrl);
+  async function handleUploadSubmit() {
+    if (!selectedUploadFile) return;
 
     if (elements.btnUploadSubmit) {
       elements.btnUploadSubmit.disabled = true;
-      elements.btnUploadSubmit.textContent = selectedUploadFile ? "Uploading to Local Agent..." : "Connecting to Local Agent...";
+      elements.btnUploadSubmit.textContent = "Compressing & Uploading...";
     }
     if (elements.uploadErrorBox) {
       elements.uploadErrorBox.classList.add("hidden");
     }
 
     try {
-      if (selectedUploadFile) {
-        if (elements.btnUploadSubmit) {
-          elements.btnUploadSubmit.textContent = `Uploading ${selectedUploadFile.name} to Local Agent...`;
+      let uploadBytes;
+
+      // 1. Client-side gzip compression using standard Web Streams API (reduces SQLite by 60-90%)
+      if (typeof CompressionStream !== "undefined") {
+        try {
+          const compStream = selectedUploadFile.stream().pipeThrough(new CompressionStream("gzip"));
+          const response = new Response(compStream);
+          const blob = await response.blob();
+          uploadBytes = new Uint8Array(await blob.arrayBuffer());
+        } catch (compErr) {
+          uploadBytes = new Uint8Array(await selectedUploadFile.arrayBuffer());
         }
-        const uploadResp = await fetch(`${agentUrl}/agent/upload`, {
-          method: "POST",
-          headers: {
-            "X-Filename": selectedUploadFile.name,
-            "Content-Type": "application/octet-stream"
-          },
-          body: selectedUploadFile
-        });
-        const uploadData = await uploadResp.json();
-        if (!uploadResp.ok || !uploadData.success) {
-          throw new Error(uploadData.error || `Could not upload database to local agent (${uploadResp.status})`);
-        }
-      } else if (dbPathInput) {
-        // Instruct local agent to connect to specified SQLite file
-        const connResp = await fetch(`${agentUrl}/agent/connect`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: jsonSafe({ db_path: dbPathInput })
-        });
-        const connData = await connResp.json();
-        if (!connResp.ok || !connData.success) {
-          throw new Error(connData.error || `Could not open SQLite database at ${dbPathInput}`);
-        }
+      } else {
+        uploadBytes = new Uint8Array(await selectedUploadFile.arrayBuffer());
       }
 
-      const connected = await checkLocalAgent();
-      if (!connected) {
-        let msg = `Local Agent at ${agentUrl} is unreachable. Please make sure your agent is running.`;
-        if (window.location.protocol === "https:" && agentUrl.startsWith("http:")) {
-          msg += "\n\nNote: If hosted on HTTPS (Vercel), browsers block HTTP (Mixed Content).\n" +
-                 "Options:\n" +
-                 "1. Run with SSL: ./run_agent.sh --ssl --db ...\n" +
-                 "2. Or in URL bar: Site settings -> allow 'Insecure content'\n" +
-                 "3. Or tunnel: npx localtunnel --port 8765";
-        }
-        throw new Error(msg);
+      // 2. Chunk-safe Base64 conversion (avoids call stack size limits on large typed arrays)
+      let binaryStr = "";
+      const CHUNK_SIZE = 0x8000;
+      for (let i = 0; i < uploadBytes.length; i += CHUNK_SIZE) {
+        binaryStr += String.fromCharCode.apply(null, uploadBytes.subarray(i, i + CHUNK_SIZE));
+      }
+      const base64Data = btoa(binaryStr);
+
+      // 3. Check against Vercel's 4.5 MB request body limit
+      if (base64Data.length > 4.2 * 1024 * 1024) {
+        throw new Error(
+          `Database file exceeds serverless 4.5 MB payload limit (${(selectedUploadFile.size / 1024 / 1024).toFixed(1)} MB raw, ${(uploadBytes.length / 1024 / 1024).toFixed(1)} MB compressed). Please use a smaller database.`
+        );
       }
 
-      closeUploadModal();
-      resetSession();
-      setSystemState("Ready (Local Agent)");
+      if (elements.btnUploadSubmit) {
+        elements.btnUploadSubmit.textContent = "Uploading & Indexing...";
+      }
+
+      const resp = await fetchWithAuth("/api/database/upload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: jsonSafe({
+          filename: selectedUploadFile.name,
+          file_data: base64Data
+        })
+      });
+
+      if (resp.status === 413) {
+        throw new Error("File exceeds serverless payload limits (HTTP 413 Request Entity Too Large).");
+      }
+
+      let data;
+      try {
+        data = await resp.json();
+      } catch (jsonErr) {
+        throw new Error(`Server returned HTTP ${resp.status} (${resp.statusText || "Non-JSON response"})`);
+      }
+
+      if (resp.ok && data.success) {
+        closeUploadModal();
+        resetSession();
+        await loadDatabases();
+        await fetchBackendSchema();
+        await fetchBackendStatus();
+        setSystemState("Ready");
+      } else {
+        if (elements.uploadErrorMsg) {
+          elements.uploadErrorMsg.textContent = data.error || "Failed to upload database.";
+          elements.uploadErrorBox.classList.remove("hidden");
+        }
+      }
     } catch (err) {
       if (elements.uploadErrorMsg) {
-        elements.uploadErrorMsg.textContent = err.message || "Failed to connect to Local Agent.";
+        elements.uploadErrorMsg.textContent = "Upload failed: " + err.message;
         elements.uploadErrorBox.classList.remove("hidden");
       }
     } finally {
       if (elements.btnUploadSubmit) {
         elements.btnUploadSubmit.disabled = false;
-        elements.btnUploadSubmit.textContent = "Connect Local Database";
+        elements.btnUploadSubmit.textContent = "Upload & Connect";
       }
     }
   }
@@ -1485,64 +1237,6 @@
       });
     }
 
-    // Direct file picker / dropzone for Local Agent
-    if (elements.fileDropzone && elements.dbFileInput) {
-      elements.fileDropzone.addEventListener("click", () => {
-        elements.dbFileInput.click();
-      });
-
-      elements.dbFileInput.addEventListener("change", (e) => {
-        if (e.target.files && e.target.files[0]) {
-          selectedUploadFile = e.target.files[0];
-          if (elements.dropzoneText) {
-            elements.dropzoneText.textContent = `Selected: ${selectedUploadFile.name} (${(selectedUploadFile.size / 1024).toFixed(1)} KB)`;
-          }
-          if (elements.inputLocalDbPath) {
-            elements.inputLocalDbPath.value = "";
-          }
-        }
-      });
-
-      elements.fileDropzone.addEventListener("dragover", (e) => {
-        e.preventDefault();
-        elements.fileDropzone.style.borderColor = "var(--accent-active)";
-        elements.fileDropzone.style.background = "rgba(139, 154, 110, 0.25)";
-      });
-
-      elements.fileDropzone.addEventListener("dragleave", (e) => {
-        e.preventDefault();
-        elements.fileDropzone.style.borderColor = "rgba(255,255,255,0.2)";
-        elements.fileDropzone.style.background = "rgba(0,0,0,0.15)";
-      });
-
-      elements.fileDropzone.addEventListener("drop", (e) => {
-        e.preventDefault();
-        elements.fileDropzone.style.borderColor = "rgba(255,255,255,0.2)";
-        elements.fileDropzone.style.background = "rgba(0,0,0,0.15)";
-        if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]) {
-          selectedUploadFile = e.dataTransfer.files[0];
-          if (elements.dropzoneText) {
-            elements.dropzoneText.textContent = `Selected: ${selectedUploadFile.name} (${(selectedUploadFile.size / 1024).toFixed(1)} KB)`;
-          }
-          if (elements.inputLocalDbPath) {
-            elements.inputLocalDbPath.value = "";
-          }
-        }
-      });
-    }
-
-    if (elements.inputLocalDbPath) {
-      elements.inputLocalDbPath.addEventListener("input", () => {
-        if (elements.inputLocalDbPath.value.trim()) {
-          selectedUploadFile = null;
-          if (elements.dbFileInput) elements.dbFileInput.value = "";
-          if (elements.dropzoneText) {
-            elements.dropzoneText.textContent = "Click to choose SQLite file or drag & drop here";
-          }
-        }
-      });
-    }
-
     // Global Escape Key to close open modals
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape") {
@@ -1550,28 +1244,34 @@
         closeSettingsModal();
       }
     });
+    if (elements.fileDropzone) {
+      elements.fileDropzone.addEventListener("click", () => {
+        if (elements.dbFileInput) elements.dbFileInput.click();
+      });
+      elements.fileDropzone.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        elements.fileDropzone.classList.add("dragover");
+      });
+      elements.fileDropzone.addEventListener("dragleave", () => {
+        elements.fileDropzone.classList.remove("dragover");
+      });
+      elements.fileDropzone.addEventListener("drop", (e) => {
+        e.preventDefault();
+        elements.fileDropzone.classList.remove("dragover");
+        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+          handleFileSelected(e.dataTransfer.files[0]);
+        }
+      });
+    }
+    if (elements.dbFileInput) {
+      elements.dbFileInput.addEventListener("change", (e) => {
+        if (e.target.files && e.target.files.length > 0) {
+          handleFileSelected(e.target.files[0]);
+        }
+      });
+    }
     if (elements.btnUploadSubmit) {
-      elements.btnUploadSubmit.addEventListener("click", () => {
-        handleConnectLocal();
-      });
-    }
-
-    if (elements.inputLocalDbPath) {
-      elements.inputLocalDbPath.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          handleConnectLocal();
-        }
-      });
-    }
-
-    if (elements.inputLocalAgentUrl) {
-      elements.inputLocalAgentUrl.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          handleConnectLocal();
-        }
-      });
+      elements.btnUploadSubmit.addEventListener("click", handleUploadSubmit);
     }
 
     // Database Switcher

@@ -1,7 +1,7 @@
 import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union
 
 
 @dataclass(frozen=True)
@@ -15,27 +15,6 @@ class ColumnSchema:
     is_unique: bool = False
     default_value: Optional[str] = None
 
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "name": self.name,
-            "data_type": self.data_type,
-            "is_nullable": self.is_nullable,
-            "is_primary_key": self.is_primary_key,
-            "is_unique": self.is_unique,
-            "default_value": self.default_value,
-        }
-
-    @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "ColumnSchema":
-        return cls(
-            name=d["name"],
-            data_type=d.get("data_type") or d.get("type") or "TEXT",
-            is_nullable=d.get("is_nullable", not d.get("is_not_null", False)),
-            is_primary_key=d.get("is_primary_key", False),
-            is_unique=d.get("is_unique", False),
-            default_value=d.get("default_value"),
-        )
-
 
 @dataclass(frozen=True)
 class ForeignKeySchema:
@@ -44,21 +23,6 @@ class ForeignKeySchema:
     column: str
     foreign_table: str
     foreign_column: str
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "column": self.column,
-            "foreign_table": self.foreign_table,
-            "foreign_column": self.foreign_column,
-        }
-
-    @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "ForeignKeySchema":
-        return cls(
-            column=d["column"],
-            foreign_table=d["foreign_table"],
-            foreign_column=d["foreign_column"],
-        )
 
 
 @dataclass
@@ -75,47 +39,6 @@ class TableSchema:
             if col.name.lower() == col_name.lower():
                 return col
         return None
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "name": self.name,
-            "columns": [c.to_dict() for c in self.columns],
-            "primary_keys": list(self.primary_keys),
-            "foreign_keys": [fk.to_dict() for fk in self.foreign_keys],
-        }
-
-    @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "TableSchema":
-        cols = [ColumnSchema.from_dict(c) for c in d.get("columns", [])]
-        fks = []
-        for fk in d.get("foreign_keys", []):
-            if isinstance(fk, dict):
-                fks.append(ForeignKeySchema.from_dict(fk))
-            elif isinstance(fk, str):
-                import re
-                m = re.match(r"^(\w+)\((\w+)\)$", fk.strip())
-                if m:
-                    fks.append(ForeignKeySchema(column="", foreign_table=m.group(1), foreign_column=m.group(2)))
-        for c in d.get("columns", []):
-            fk_str = c.get("foreign_key")
-            if fk_str and isinstance(fk_str, str):
-                import re
-                m = re.match(r"^(\w+)\((\w+)\)$", fk_str.strip())
-                if m and not any(f.column.lower() == c["name"].lower() for f in fks):
-                    fks.append(ForeignKeySchema(
-                        column=c["name"],
-                        foreign_table=m.group(1),
-                        foreign_column=m.group(2)
-                    ))
-        pks = d.get("primary_keys", [])
-        if not pks:
-            pks = [c.name for c in cols if c.is_primary_key]
-        return cls(
-            name=d["name"],
-            columns=cols,
-            primary_keys=list(pks),
-            foreign_keys=fks,
-        )
 
     def to_prompt_str(self) -> str:
         """Render clean, minimal human-readable schema string for LLM context."""
@@ -147,28 +70,6 @@ class DatabaseSchema:
 
     def get_table(self, table_name: str) -> Optional[TableSchema]:
         return self.tables.get(table_name.lower())
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "database": Path(self.database_path).name if self.database_path else "database.db",
-            "database_path": self.database_path,
-            "tables": [t.to_dict() for t in self.tables.values()],
-        }
-
-    @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "DatabaseSchema":
-        db_path = d.get("database_path", d.get("database", "database.db"))
-        tables: Dict[str, TableSchema] = {}
-        raw_tables = d.get("tables", [])
-        if isinstance(raw_tables, dict):
-            for k, t_data in raw_tables.items():
-                t = TableSchema.from_dict(t_data)
-                tables[t.name.lower()] = t
-        elif isinstance(raw_tables, list):
-            for t_data in raw_tables:
-                t = TableSchema.from_dict(t_data)
-                tables[t.name.lower()] = t
-        return cls(database_path=str(db_path), tables=tables)
 
     def to_prompt_str(self, table_subset: Optional[List[str]] = None) -> str:
         """Render complete or subsetted schema description for LLM prompt."""

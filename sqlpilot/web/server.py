@@ -190,50 +190,48 @@ class SQLPilotHTTPRequestHandler(SimpleHTTPRequestHandler):
             return
 
         elif clean_path == "/api/database/upload":
-            self._send_json(410, {
-                "success": False,
-                "error": "Database uploads to cloud are permanently disabled by policy. Your SQLite database must remain exclusively on your local machine.",
-            })
-            return
-
-        elif clean_path == "/api/database/delete":
-            self._send_json(410, {
-                "success": False,
-                "error": "Cloud database management is permanently disabled. Databases remain on your local machine.",
-            })
-            return
-
-        elif clean_path in ("/api/schema/sync", "/api/schema"):
             payload = self._read_json()
+            filename = payload.get("filename", "custom.db")
+            b64_data = payload.get("file_data", "")
             auth_token = payload.get("auth_token") or token
-            result = svc.sync_schema(payload, token=auth_token)
-            status_code = 200 if result.get("success", False) else 400
+            try:
+                import base64
+                file_bytes = base64.b64decode(b64_data)
+            except Exception:
+                self._send_json(400, {"success": False, "error": "Invalid base64 database file payload."})
+                return
+            result = svc.upload_database(filename, file_bytes, token=auth_token)
+            status_code = 200 if result.get("success", False) else result.get("status_code", 400)
             self._send_json(status_code, result)
             return
 
-        elif clean_path in ("/api/query/generate", "/api/generate"):
+        elif clean_path == "/api/database/delete":
+            payload = self._read_json()
+            filename = payload.get("filename", "")
+            auth_token = payload.get("auth_token") or token
+            result = svc.delete_database(filename, token=auth_token)
+            status_code = 200 if result.get("success", False) else result.get("status_code", 400)
+            self._send_json(status_code, result)
+            return
+
+        elif clean_path == "/api/query/generate":
             payload = self._read_json()
             question = payload.get("question", "")
             auth_token = payload.get("auth_token") or token
             user_llm = self._extract_user_llm_config(payload)
-            schema_meta = payload.get("schema") or payload.get("schema_metadata")
-            execute_cloud = payload.get("execute_cloud")
-            result = svc.generate_and_route(
-                question,
-                token=auth_token,
-                user_llm_config=user_llm,
-                schema_metadata=schema_meta,
-                execute_cloud=execute_cloud,
-            )
+            result = svc.generate_and_route(question, token=auth_token, user_llm_config=user_llm)
             status_code = 200 if result.get("success", False) else result.get("status_code", 400)
             self._send_json(status_code, result)
             return
 
         elif clean_path == "/api/query/approve":
-            self._send_json(403, {
-                "success": False,
-                "error": "Cloud execution of modifying queries is permanently disabled. Modifying queries must be approved and executed directly on your local SQLPilot agent at http://127.0.0.1:8765/agent/approve.",
-            })
+            payload = self._read_json()
+            pending_token = payload.get("token", "")
+            sql = payload.get("sql", "")
+            auth_token = payload.get("auth_token") or token
+            result = svc.approve_and_execute(pending_token, sql, auth_token=auth_token)
+            status_code = 200 if result.get("success", False) else result.get("status_code", 400)
+            self._send_json(status_code, result)
             return
 
         elif clean_path == "/api/query/reject":
